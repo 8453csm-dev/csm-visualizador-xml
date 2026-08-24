@@ -125,6 +125,11 @@ class LibraryDB:
         with self.connect() as con:
             yield lambda doc: self._upsert_on_connection(con, doc)
 
+    def recent(self, limit: int = 300) -> list[dict]:
+        with self.connect() as con:
+            rows = con.execute('SELECT * FROM documents ORDER BY issue_date DESC, number DESC LIMIT ?', (limit,)).fetchall()
+            return [dict(r) for r in rows]
+
     def search(self, query: str, limit: int = 100) -> list[dict]:
         q = f'%{query.strip()}%'
         with self.connect() as con:
