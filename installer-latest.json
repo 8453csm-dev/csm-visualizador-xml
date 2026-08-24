@@ -1,0 +1,12 @@
+{
+  "product": "CSM Visualizador XML",
+  "software_version": "3.7.8",
+  "installer_version": "v4",
+  "installer": "CSMVisualizadorXML-Instalador-Online-Moderno-v4.exe",
+  "sha256": "9327241613f7c31f2414ddb20b2da4f0e74079a6fba630679847895f5a6ffc35",
+  "status": "homologated",
+  "homologated_at": "2026-08-24",
+  "recommended": true,
+  "download_url": null,
+  "offline_fallback": "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe"
+}
