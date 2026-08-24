@@ -1,0 +1,73 @@
+name: Publicar canal da release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  atualizar-canal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Baixar instalador da release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p /tmp/csm-release
+          gh release download "$TAG" --pattern "*.exe" --dir /tmp/csm-release
+          test -n "$(find /tmp/csm-release -maxdepth 1 -name '*.exe' -print -quit)"
+
+      - name: Atualizar latest.json e checksum
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, pathlib
+
+          files = list(pathlib.Path('/tmp/csm-release').glob('*.exe'))
+          if len(files) != 1:
+              raise SystemExit(f'Esperado exatamente 1 EXE na release; encontrados {len(files)}')
+
+          exe = files[0]
+          sha = hashlib.sha256(exe.read_bytes()).hexdigest()
+          tag = os.environ['TAG']
+          version = tag[1:] if tag.lower().startswith('v') else tag
+          owner = '${{ github.repository_owner }}'
+          repo = '${{ github.event.repository.name }}'
+          download_url = f'https://github.com/{owner}/{repo}/releases/download/{tag}/{exe.name}'
+
+          latest = {
+              'product': 'CSM Visualizador XML',
+              'version': version,
+              'installer': exe.name,
+              'sha256': sha,
+              'status': 'stable',
+              'download_url': download_url,
+              'release_url': os.environ['RELEASE_URL'],
+          }
+          pathlib.Path('latest.json').write_text(json.dumps(latest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          outdir = pathlib.Path('releases') / version
+          outdir.mkdir(parents=True, exist_ok=True)
+          (outdir / 'SHA256SUMS.txt').write_text(f'{sha}  {exe.name}\n', encoding='utf-8')
+          print('VERSION', version)
+          print('INSTALLER', exe.name)
+          print('SHA256', sha)
+          print('DOWNLOAD', download_url)
+          PY
+
+      - name: Commitar canal oficial
+        run: |
+          git config user.name "CSM Release Bot"
+          git config user.email "8453csm@gmail.com"
+          git add latest.json releases/
+          git diff --cached --quiet && exit 0
+          git commit -m "Atualizar canal oficial para ${{ github.event.release.tag_name }}"
+          git push
