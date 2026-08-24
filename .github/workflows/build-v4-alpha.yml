@@ -6,6 +6,11 @@ on:
     paths:
       - "v4/**"
       - ".github/workflows/build-v4-alpha.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "v4/**"
+      - ".github/workflows/build-v4-alpha.yml"
   workflow_dispatch:
 
 permissions:
