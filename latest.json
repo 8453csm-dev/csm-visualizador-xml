@@ -4,7 +4,8 @@
   "installer": "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe",
   "sha256": "d6086b661fb40d4c05ce76d38ecec836a8ff7d5c4c55a6df35c68ed03b484b74",
   "status": "stable",
-  "download_url": null,
+  "download_url": "https://github.com/8453csm-dev/csm-visualizador-xml/releases/download/v3.7.8/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe",
+  "release_url": "https://github.com/8453csm-dev/csm-visualizador-xml/releases/tag/v3.7.8",
   "notes": [
     "Versão estável para novas instalações.",
     "Consulta DANFE e Meu DANFE funcionais.",
