@@ -6,6 +6,11 @@ on:
     paths:
       - "installer-completo/**"
       - ".github/workflows/build-installer-completo-final.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "installer-completo/**"
+      - ".github/workflows/build-installer-completo-final.yml"
   workflow_dispatch:
 
 permissions:
