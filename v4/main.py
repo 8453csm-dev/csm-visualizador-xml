@@ -104,6 +104,15 @@ class AppApi:
         return op
 
 
+def smoke_test() -> int:
+    # Teste executado DEPOIS do PyInstaller no runner Windows.
+    # Importar WinForms força o carregamento do pythonnet/Python.Runtime.dll,
+    # exatamente o ponto que falhou na Alpha 1 em uma máquina real.
+    import clr  # noqa: F401
+    import webview.platforms.winforms  # noqa: F401
+    return 0
+
+
 def run():
     api = AppApi()
     base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
@@ -114,4 +123,6 @@ def run():
 
 
 if __name__ == '__main__':
+    if '--smoke-test' in sys.argv:
+        raise SystemExit(smoke_test())
     run()
