@@ -1,0 +1,76 @@
+name: Build Instalador Completo Final
+
+on:
+  push:
+    branches: ["release/instalador-completo-final"]
+    paths:
+      - "installer-completo/**"
+      - ".github/workflows/build-installer-completo-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Go 1.23
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Baixar instalador oficial 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path installer-completo/payload | Out-Null
+          gh release download v3.7.8 `
+            --repo 8453csm-dev/csm-visualizador-xml `
+            --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            --dir installer-completo/payload
+
+      - name: Validar instalador base
+        shell: pwsh
+        run: |
+          $base = "installer-completo/payload/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe"
+          if (!(Test-Path $base)) { throw "Instalador base não foi baixado" }
+          $sha = (Get-FileHash $base -Algorithm SHA256).Hash.ToLower()
+          if ($sha -ne "d6086b661fb40d4c05ce76d38ecec836a8ff7d5c4c55a6df35c68ed03b484b74") {
+            throw "SHA-256 inesperado no instalador base: $sha"
+          }
+
+      - name: Compilar instalador único
+        shell: pwsh
+        working-directory: installer-completo
+        run: |
+          New-Item -ItemType Directory -Force -Path ../dist | Out-Null
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o "../dist/CSMVisualizadorXML-Instalador-Completo-Atualizado.exe" .
+
+      - name: Self-test do EXE final
+        shell: pwsh
+        run: |
+          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Atualizado.exe"
+          if (!(Test-Path $exe)) { throw "EXE final não gerado" }
+          $p = Start-Process -FilePath $exe -ArgumentList "--self-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Self-test falhou com código $($p.ExitCode)" }
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Atualizado.exe"
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$sha  CSMVisualizadorXML-Instalador-Completo-Atualizado.exe" | Set-Content -Encoding ascii "dist/SHA256.txt"
+          Write-Host "SHA256=$sha"
+
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-Instalador-Completo-Atualizado
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
