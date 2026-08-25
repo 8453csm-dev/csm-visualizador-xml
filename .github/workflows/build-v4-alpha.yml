@@ -1,0 +1,79 @@
+name: Build CSM Visualizador XML 4.0 Alpha
+
+on:
+  push:
+    branches: ["feature/v4-alpha1"]
+    paths:
+      - "v4/**"
+      - ".github/workflows/build-v4-alpha.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "v4/**"
+      - ".github/workflows/build-v4-alpha.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r v4/requirements.txt pytest pyinstaller==6.15.0
+          python -m pip show pythonnet clr-loader pywebview
+
+      - name: Testar nucleo
+        shell: pwsh
+        run: python -m pytest -q v4/tests
+
+      - name: Validar Python
+        shell: pwsh
+        run: python -m compileall -q v4
+
+      - name: Gerar aplicativo Windows
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --windowed --onedir `
+            --name "CSMVisualizadorXML-4.0.0-alpha.2" `
+            --hidden-import clr `
+            --collect-all webview `
+            --add-data "v4/ui;ui" `
+            v4/main.py
+
+      - name: Smoke test do EXE empacotado
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "dist/CSMVisualizadorXML-4.0.0-alpha.2/CSMVisualizadorXML-4.0.0-alpha.2.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--smoke-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Smoke test do EXE falhou com codigo $($p.ExitCode)" }
+          Write-Host "Smoke test WinForms/pythonnet OK"
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/CSMVisualizadorXML-4.0.0-alpha.2/CSMVisualizadorXML-4.0.0-alpha.2.exe"
+          if (!(Test-Path $exe)) { throw "Executavel nao gerado" }
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$sha  CSMVisualizadorXML-4.0.0-alpha.2.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-4.0.0-alpha.2/SHA256.txt"
+
+      - name: Publicar artefato de homologacao
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-4.0.0-alpha.2-windows
+          path: dist/CSMVisualizadorXML-4.0.0-alpha.2/
+          if-no-files-found: error
+          retention-days: 14
