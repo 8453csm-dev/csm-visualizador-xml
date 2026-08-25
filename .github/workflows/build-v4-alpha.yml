@@ -34,6 +34,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r v4/requirements.txt pytest pyinstaller==6.15.0
+          python -m pip show pythonnet clr-loader pywebview
 
       - name: Testar nucleo
         shell: pwsh
@@ -47,23 +48,32 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --windowed --onedir `
-            --name "CSMVisualizadorXML-4.0.0-alpha.1" `
+            --name "CSMVisualizadorXML-4.0.0-alpha.2" `
+            --hidden-import clr `
             --collect-all webview `
             --add-data "v4/ui;ui" `
             v4/main.py
 
+      - name: Smoke test do EXE empacotado
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "dist/CSMVisualizadorXML-4.0.0-alpha.2/CSMVisualizadorXML-4.0.0-alpha.2.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--smoke-test" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Smoke test do EXE falhou com codigo $($p.ExitCode)" }
+          Write-Host "Smoke test WinForms/pythonnet OK"
+
       - name: Gerar checksum
         shell: pwsh
         run: |
-          $exe = "dist/CSMVisualizadorXML-4.0.0-alpha.1/CSMVisualizadorXML-4.0.0-alpha.1.exe"
+          $exe = "dist/CSMVisualizadorXML-4.0.0-alpha.2/CSMVisualizadorXML-4.0.0-alpha.2.exe"
           if (!(Test-Path $exe)) { throw "Executavel nao gerado" }
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$sha  CSMVisualizadorXML-4.0.0-alpha.1.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-4.0.0-alpha.1/SHA256.txt"
+          "$sha  CSMVisualizadorXML-4.0.0-alpha.2.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-4.0.0-alpha.2/SHA256.txt"
 
       - name: Publicar artefato de homologacao
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-4.0.0-alpha.1-windows
-          path: dist/CSMVisualizadorXML-4.0.0-alpha.1/
+          name: CSMVisualizadorXML-4.0.0-alpha.2-windows
+          path: dist/CSMVisualizadorXML-4.0.0-alpha.2/
           if-no-files-found: error
           retention-days: 14
