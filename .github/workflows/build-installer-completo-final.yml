@@ -1,0 +1,132 @@
+name: Build Instalador Completo Profissional
+
+on:
+  push:
+    branches: ["release/instalador-completo-final"]
+    paths:
+      - "installer-v2/**"
+      - "installer-completo/enhancer_v8.html"
+      - ".github/workflows/build-installer-completo-final.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "installer-v2/**"
+      - "installer-completo/enhancer_v8.html"
+      - ".github/workflows/build-installer-completo-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Baixar instalador oficial 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 `
+            --repo 8453csm-dev/csm-visualizador-xml `
+            --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            --dir temp
+
+      - name: Validar e extrair payload real
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py `
+            "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            "installer-completo/enhancer_v8.html" `
+            "installer-v2/payload"
+          if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Executável principal ausente após extração" }
+          if (!(Test-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico")) { throw "Ícone oficial ausente após extração" }
+
+      - name: Gerar identidade visual do instalador
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python installer-v2/make_brand.py
+          if (!(Test-Path "installer-v2/wizard.bmp")) { throw "Wizard image não gerada" }
+          if (!(Test-Path "installer-v2/wizard-small.bmp")) { throw "Wizard small image não gerada" }
+
+      - name: Instalar Inno Setup 6
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          if (!(Test-Path $iscc)) { throw "ISCC.exe não encontrado" }
+
+      - name: Compilar instalador profissional
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
+          if (!(Test-Path "dist/CSMVisualizadorXML-Instalador-Completo.exe")) { throw "Instalador final não gerado" }
+
+      - name: Teste real de instalação limpa e desinstalação
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo.exe").Path
+          $testDir = Join-Path $env:TEMP "CSMVisualizadorXML-Homologacao"
+          $legacy = Join-Path $env:LOCALAPPDATA "CSMVisualizadorXML"
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $shortcut = Join-Path $desktop "CSM Visualizador XML.lnk"
+          Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $legacy -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $legacy | Out-Null
+          "residuo-antigo" | Set-Content (Join-Path $legacy "residuo.txt")
+
+          $args = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="' + $testDir + '"'
+          $p = Start-Process -FilePath $installer -ArgumentList $args -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Instalação silenciosa falhou: $($p.ExitCode)" }
+
+          $main = Join-Path $testDir "CSM Visualizador XML.exe"
+          $uninstaller = Join-Path $testDir "unins000.exe"
+          if (!(Test-Path $main)) { throw "Executável principal não instalado" }
+          if (!(Test-Path $uninstaller)) { throw "Desinstalador não instalado" }
+          if (Test-Path (Join-Path $legacy "residuo.txt")) { throw "Resíduo de versão antiga não foi removido" }
+          if (!(Test-Path $shortcut)) { throw "Atalho da Área de Trabalho não foi criado" }
+
+          $htmls = Get-ChildItem $testDir -Recurse -File -Include *.html,*.htm
+          $marker = $false
+          foreach ($h in $htmls) {
+            if (Select-String -Path $h.FullName -Pattern "CSM_XML_ENHANCER_V8" -Quiet -ErrorAction SilentlyContinue) { $marker = $true; break }
+          }
+          if (!$marker) { throw "Aba XML v8 não encontrada nos arquivos instalados" }
+
+          $up = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+          if ($up.ExitCode -ne 0) { throw "Desinstalação silenciosa falhou: $($up.ExitCode)" }
+          Start-Sleep -Milliseconds 500
+          if (Test-Path $main) { throw "Executável principal permaneceu após desinstalação" }
+          if (Test-Path $shortcut) { throw "Atalho da Área de Trabalho permaneceu após desinstalação" }
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/CSMVisualizadorXML-Instalador-Completo.exe"
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$sha  CSMVisualizadorXML-Instalador-Completo.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-Instalador-Completo-SHA256.txt"
+          Write-Host "SHA256=$sha"
+
+      - name: Publicar artefato de homologação
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-Instalador-Completo-Profissional
+          path: |
+            dist/CSMVisualizadorXML-Instalador-Completo.exe
+            dist/CSMVisualizadorXML-Instalador-Completo-SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
