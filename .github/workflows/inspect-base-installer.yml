@@ -1,0 +1,35 @@
+name: Inspect Base Installer
+
+on:
+  push:
+    branches: ["release/instalador-completo-final"]
+    paths:
+      - ".github/workflows/inspect-base-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download 3.7.8 base installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+      - name: Inspect with 7-Zip
+        shell: pwsh
+        run: |
+          $base = "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe"
+          & 7z l $base | Select-Object -First 120
+          Write-Host "--- PE strings hints ---"
+          $bytes = [System.IO.File]::ReadAllBytes($base)
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          foreach($needle in @('Inno Setup','Nullsoft','NSIS','/VERYSILENT','/SILENT','/S','unins000','InstallShield')) {
+            Write-Host "$needle => $($text.Contains($needle))"
+          }
