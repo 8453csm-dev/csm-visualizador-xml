@@ -5,6 +5,7 @@ on:
     branches: ["release/instalador-completo-final"]
     paths:
       - ".github/workflows/inspect-base-installer.yml"
+      - "tools/inspect_base.py"
   workflow_dispatch:
 
 permissions:
@@ -22,57 +23,15 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path temp | Out-Null
           gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
-      - name: Inspect embedded payload signatures
+      - name: Inspect payload
         shell: pwsh
         run: |
           $base = "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe"
           & 7z l $base | Select-Object -First 80
-          @'
-import pathlib, re, struct, zipfile, io
-p = pathlib.Path(r"temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe")
-b = p.read_bytes()
-for magic,name in [(b'PK\x03\x04','ZIP local'),(b'PK\x05\x06','ZIP EOCD'),(b'MZ','PE/MZ'),(b'7z\xbc\xaf\x27\x1c','7z'),(b'\x1f\x8b','gzip')]:
-    pos=[]; start=0
-    while True:
-        i=b.find(magic,start)
-        if i<0: break
-        pos.append(i); start=i+1
-    print(name, 'count=',len(pos),'first=',pos[:20])
-# try each PK start as zip
-starts=[]; s=0
-while True:
-    i=b.find(b'PK\x03\x04',s)
-    if i<0: break
-    starts.append(i); s=i+1
-for i in starts[:100]:
-    try:
-        z=zipfile.ZipFile(io.BytesIO(b[i:]))
-        names=z.namelist()
-        if names:
-            print('VALID_ZIP_AT',i,'files',len(names),'sample',names[:20])
-            out=pathlib.Path('temp/extracted')
-            out.mkdir(exist_ok=True)
-            z.extractall(out)
-            print('EXTRACTED_TO',out)
-            break
-    except Exception:
-        pass
-# printable strings hints
-strings=re.findall(rb'[ -~]{6,}',b)
-keys=[b'CSM',b'Visualizador',b'payload',b'zip',b'install',b'shortcut',b'LocalAppData',b'ProgramFiles',b'python',b'webview']
-seen=0
-for x in strings:
-    lx=x.lower()
-    if any(k.lower() in lx for k in keys):
-        try: print('STR',x[:300].decode('ascii','ignore'))
-        except: pass
-        seen+=1
-        if seen>=120: break
-'@ | Set-Content temp/inspect.py
-          python temp/inspect.py
+          python tools/inspect_base.py
       - name: List extracted payload if found
         shell: pwsh
         run: |
           if (Test-Path temp/extracted) {
-            Get-ChildItem temp/extracted -Recurse -File | Select-Object -First 100 FullName,Length
+            Get-ChildItem temp/extracted -Recurse -File | Select-Object -First 120 FullName,Length
           }
