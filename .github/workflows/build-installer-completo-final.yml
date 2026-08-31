@@ -2,7 +2,7 @@ name: Build Instalador Completo Profissional
 
 on:
   push:
-    branches: ["release/instalador-completo-final"]
+    branches: ["release/instalador-completo-final", "fix/janela-invisivel-xml"]
     paths:
       - "installer-v2/**"
       - "installer-completo/enhancer_v8.html"
@@ -30,6 +30,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
       - name: Baixar instalador oficial 3.7.8
         shell: pwsh
         env:
@@ -50,6 +55,26 @@ jobs:
             "installer-v2/payload"
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Executável principal ausente após extração" }
           if (!(Test-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico")) { throw "Ícone oficial ausente após extração" }
+
+      - name: Integrar launcher de recuperação de janela
+        shell: pwsh
+        run: |
+          $original = "installer-v2/payload/CSM Visualizador XML.exe"
+          $core = "installer-v2/payload/CSM Visualizador XML Core.exe"
+          Move-Item -Force $original $core
+
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags="-H windowsgui -s -w" `
+            -o "installer-v2/payload/CSM Visualizador XML.exe" `
+            "installer-v2/launcher/main.go"
+
+          if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher não gerado" }
+          if (!(Test-Path $core)) { throw "Core original não preservado" }
+
+          $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if ($self.ExitCode -ne 0) { throw "Self-test do launcher falhou: $($self.ExitCode)" }
 
       - name: Gerar identidade visual do instalador
         shell: pwsh
@@ -73,14 +98,14 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
-          if (!(Test-Path "dist/CSMVisualizadorXML-Instalador-Completo.exe")) { throw "Instalador final não gerado" }
+          if (!(Test-Path "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe")) { throw "Instalador final não gerado" }
 
-      - name: Teste real de instalação limpa e desinstalação
+      - name: Teste real de instalação limpa, launcher e desinstalação
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo.exe").Path
-          $testDir = Join-Path $env:TEMP "CSMVisualizadorXML-Homologacao"
+          $installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe").Path
+          $testDir = Join-Path $env:TEMP "CSMVisualizadorXML-JanelaFix-Homologacao"
           $legacy = Join-Path $env:LOCALAPPDATA "CSMVisualizadorXML"
           $desktop = [Environment]::GetFolderPath('Desktop')
           $shortcut = Join-Path $desktop "CSM Visualizador XML.lnk"
@@ -94,11 +119,17 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Instalação silenciosa falhou: $($p.ExitCode)" }
 
           $main = Join-Path $testDir "CSM Visualizador XML.exe"
+          $core = Join-Path $testDir "CSM Visualizador XML Core.exe"
           $uninstaller = Join-Path $testDir "unins000.exe"
-          if (!(Test-Path $main)) { throw "Executável principal não instalado" }
+          if (!(Test-Path $main)) { throw "Launcher principal não instalado" }
+          if (!(Test-Path $core)) { throw "Core do Visualizador não instalado" }
           if (!(Test-Path $uninstaller)) { throw "Desinstalador não instalado" }
           if (Test-Path (Join-Path $legacy "residuo.txt")) { throw "Resíduo de versão antiga não foi removido" }
           if (!(Test-Path $shortcut)) { throw "Atalho da Área de Trabalho não foi criado" }
+          if (!(Test-Path "Registry::HKEY_CURRENT_USER\Software\Classes\Applications\CSM Visualizador XML.exe\shell\open\command")) { throw "Registro Abrir com não foi criado" }
+
+          $launchTest = Start-Process -FilePath $main -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if ($launchTest.ExitCode -ne 0) { throw "Launcher instalado falhou no self-test" }
 
           $htmls = Get-ChildItem $testDir -Recurse -File -Include *.html,*.htm
           $marker = $false
@@ -109,24 +140,25 @@ jobs:
 
           $up = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
           if ($up.ExitCode -ne 0) { throw "Desinstalação silenciosa falhou: $($up.ExitCode)" }
-          Start-Sleep -Milliseconds 500
-          if (Test-Path $main) { throw "Executável principal permaneceu após desinstalação" }
+          Start-Sleep -Milliseconds 700
+          if (Test-Path $main) { throw "Launcher permaneceu após desinstalação" }
+          if (Test-Path $core) { throw "Core permaneceu após desinstalação" }
           if (Test-Path $shortcut) { throw "Atalho da Área de Trabalho permaneceu após desinstalação" }
 
       - name: Gerar checksum
         shell: pwsh
         run: |
-          $exe = "dist/CSMVisualizadorXML-Instalador-Completo.exe"
+          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe"
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$sha  CSMVisualizadorXML-Instalador-Completo.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-Instalador-Completo-SHA256.txt"
+          "$sha  CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix-SHA256.txt"
           Write-Host "SHA256=$sha"
 
       - name: Publicar artefato de homologação
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Instalador-Completo-Profissional
+          name: CSMVisualizadorXML-Janela-Fix
           path: |
-            dist/CSMVisualizadorXML-Instalador-Completo.exe
-            dist/CSMVisualizadorXML-Instalador-Completo-SHA256.txt
+            dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe
+            dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix-SHA256.txt
           if-no-files-found: error
           retention-days: 30
