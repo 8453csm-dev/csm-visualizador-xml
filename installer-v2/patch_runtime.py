@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 MARKER = "CSM_MULTI_TAB_BRIDGE_V1"
+LOOKUP_MARKER = "CSM_LOCATOR_FIX_V1"
 BROKER = "http://127.0.0.1:47878"
 
 
@@ -23,15 +24,13 @@ def patch_index(path: Path) -> None:
 
 def patch_app_js(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
-    if MARKER in text:
-        print(f"app.js já contém {MARKER}")
-        return
 
-    anchor = "function statusClass(s){s=(s||'').toUpperCase();return s.includes('AUTORIZ')||s==='EMITIDA'?'good':s.includes('CANCEL')||s.includes('DENEG')?'bad':'warn'}\n"
-    if anchor not in text:
-        raise RuntimeError("Âncora statusClass não encontrada em app.js")
+    if MARKER not in text:
+        anchor = "function statusClass(s){s=(s||'').toUpperCase();return s.includes('AUTORIZ')||s==='EMITIDA'?'good':s.includes('CANCEL')||s.includes('DENEG')?'bad':'warn'}\n"
+        if anchor not in text:
+            raise RuntimeError("Âncora statusClass não encontrada em app.js")
 
-    helpers = r'''// CSM_MULTI_TAB_BRIDGE_V1
+        helpers = r'''// CSM_MULTI_TAB_BRIDGE_V1
 function companyTabLabel(doc){
  const raw=String(doc?.issuer_name||'').trim();if(!raw)return '';
  const first=(raw.split(/\s+/)[0]||'').replace(/[.,;:]+$/,'');
@@ -57,22 +56,56 @@ function setupExternalOpenBridge(){
  }catch(e){console.warn('CSM broker indisponível',e)}
 }
 '''
-    text = text.replace(anchor, anchor + helpers, 1)
+        text = text.replace(anchor, anchor + helpers, 1)
 
-    old_tab = '''function createDocumentTab(doc){\n if(els.docTabs.querySelector(`.doc-tab[data-id="${doc.document_id}"]`))return;\n const tab=document.createElement('div');tab.className='doc-tab';tab.dataset.id=doc.document_id;tab.innerHTML=`<span class="tab-type">${esc(doc.type_label)}</span><span class="tab-name" title="${esc(doc.title)}">${esc(doc.title)}</span><span class="tab-close">×</span>`;\n tab.onclick=e=>e.target.closest('.tab-close')?closeDocument(doc.document_id):activateDocument(doc.document_id);els.docTabs.appendChild(tab)\n}'''
-    new_tab = '''function createDocumentTab(doc){\n if(els.docTabs.querySelector(`.doc-tab[data-id="${doc.document_id}"]`))return;\n const company=companyTabLabel(doc),tab=document.createElement('div');tab.className='doc-tab';tab.dataset.id=doc.document_id;tab.innerHTML=`<span class="tab-type">${esc(doc.type_label)}</span><span class="tab-copy"><span class="tab-name" title="${esc(doc.title)}">${esc(doc.title)}</span>${company?`<span class="tab-company" title="${esc(doc.issuer_name||company)}">${esc(company)}</span>`:''}</span><span class="tab-close">×</span>`;\n tab.onclick=e=>e.target.closest('.tab-close')?closeDocument(doc.document_id):activateDocument(doc.document_id);els.docTabs.appendChild(tab)\n}'''
-    if old_tab not in text:
-        raise RuntimeError("Função createDocumentTab original não encontrada")
-    text = text.replace(old_tab, new_tab, 1)
+        old_tab = '''function createDocumentTab(doc){\n if(els.docTabs.querySelector(`.doc-tab[data-id="${doc.document_id}"]`))return;\n const tab=document.createElement('div');tab.className='doc-tab';tab.dataset.id=doc.document_id;tab.innerHTML=`<span class="tab-type">${esc(doc.type_label)}</span><span class="tab-name" title="${esc(doc.title)}">${esc(doc.title)}</span><span class="tab-close">×</span>`;\n tab.onclick=e=>e.target.closest('.tab-close')?closeDocument(doc.document_id):activateDocument(doc.document_id);els.docTabs.appendChild(tab)\n}'''
+        new_tab = '''function createDocumentTab(doc){\n if(els.docTabs.querySelector(`.doc-tab[data-id="${doc.document_id}"]`))return;\n const company=companyTabLabel(doc),tab=document.createElement('div');tab.className='doc-tab';tab.dataset.id=doc.document_id;tab.innerHTML=`<span class="tab-type">${esc(doc.type_label)}</span><span class="tab-copy"><span class="tab-name" title="${esc(doc.title)}">${esc(doc.title)}</span>${company?`<span class="tab-company" title="${esc(doc.issuer_name||company)}">${esc(company)}</span>`:''}</span><span class="tab-close">×</span>`;\n tab.onclick=e=>e.target.closest('.tab-close')?closeDocument(doc.document_id):activateDocument(doc.document_id);els.docTabs.appendChild(tab)\n}'''
+        if old_tab not in text:
+            raise RuntimeError("Função createDocumentTab original não encontrada")
+        text = text.replace(old_tab, new_tab, 1)
 
-    startup = "setupDragDrop();setupShortcuts();await waitApi();await loadPreferences();showWelcome();const startup=await window.pywebview.api.consume_startup_documents();handleLoadResult(startup);setTimeout(checkUpdatesOnStartup,1800);"
-    replacement = "setupDragDrop();setupShortcuts();await waitApi();await loadPreferences();showWelcome();setupExternalOpenBridge();const startup=await window.pywebview.api.consume_startup_documents();handleLoadResult(startup);setTimeout(checkUpdatesOnStartup,1800);"
-    if startup not in text:
-        raise RuntimeError("Inicialização principal não encontrada em app.js")
-    text = text.replace(startup, replacement, 1)
+        startup = "setupDragDrop();setupShortcuts();await waitApi();await loadPreferences();showWelcome();const startup=await window.pywebview.api.consume_startup_documents();handleLoadResult(startup);setTimeout(checkUpdatesOnStartup,1800);"
+        replacement = "setupDragDrop();setupShortcuts();await waitApi();await loadPreferences();showWelcome();setupExternalOpenBridge();const startup=await window.pywebview.api.consume_startup_documents();handleLoadResult(startup);setTimeout(checkUpdatesOnStartup,1800);"
+        if startup not in text:
+            raise RuntimeError("Inicialização principal não encontrada em app.js")
+        text = text.replace(startup, replacement, 1)
+
+    if LOOKUP_MARKER not in text:
+        # O site Consulta DANFE mudou o frontend e o seletor antigo deixou de localizar o campo.
+        # O frontend avisa o launcher antes de abrir a janela; o launcher usa UI Automation
+        # como fallback robusto para preencher a chave e acionar a consulta.
+        locator_decl = "const locatorState={timer:null,key:'',contextId:'',devolutionId:'',startedAt:0,lookupSession:''};"
+        locator_decl_new = "const locatorState={timer:null,key:'',contextId:'',devolutionId:'',startedAt:0,lookupSession:'',closedWithoutDownload:false}; // CSM_LOCATOR_FIX_V1"
+        if locator_decl not in text:
+            raise RuntimeError("Estado do Localizador não encontrado")
+        text = text.replace(locator_decl, locator_decl_new, 1)
+
+        open_call = "const r=await window.pywebview.api.open_lookup_site(provider,key,desired);if(!r?.ok){toast(r?.error||'Não foi possível abrir a consulta.',true);return}"
+        open_call_new = "if(provider==='consultadanfe'){try{await fetch('http://127.0.0.1:47878/lookup-automation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider,key,format:desired})})}catch(_){}}const r=await window.pywebview.api.open_lookup_site(provider,key,desired);if(!r?.ok){toast(r?.error||'Não foi possível abrir a consulta.',true);return}"
+        if open_call not in text:
+            raise RuntimeError("Chamada open_lookup_site não encontrada")
+        text = text.replace(open_call, open_call_new, 1)
+
+        start_state = "locatorState.lookupSession=r.session_id||'';const labels="
+        start_state_new = "locatorState.lookupSession=r.session_id||'';locatorState.closedWithoutDownload=false;const labels="
+        if start_state not in text:
+            raise RuntimeError("Inicialização de lookupSession não encontrada")
+        text = text.replace(start_state, start_state_new, 1)
+
+        closed_old = "if(a.closed&&!a.downloadClicked)autoText='A janela de consulta foi fechada.'}"
+        closed_new = "if(a.closed&&!a.downloadClicked){autoText='A janela de consulta foi fechada.';locatorState.closedWithoutDownload=true}}"
+        if closed_old not in text:
+            raise RuntimeError("Tratamento antigo de janela fechada não encontrado")
+        text = text.replace(closed_old, closed_new, 1)
+
+        status_tail = "if(st)st.textContent=autoText||`Aguardando ${wanted} chegar em Downloads${'.'.repeat((ticks%3)+1)} • ${Math.floor((Date.now()-locatorState.startedAt)/1000)}s${pdfSeen&&desired==='xml'?' • PDF recebido; XML ainda aguardado':''}`;"
+        status_tail_new = "if(locatorState.closedWithoutDownload){stopLocatorWatcher();locatorState.closedWithoutDownload=false;locatorState.lookupSession='';if(st)st.textContent='A janela de consulta foi fechada. A consulta automática foi encerrada.';return}if(st)st.textContent=autoText||`Aguardando ${wanted} chegar em Downloads${'.'.repeat((ticks%3)+1)} • ${Math.floor((Date.now()-locatorState.startedAt)/1000)}s${pdfSeen&&desired==='xml'?' • PDF recebido; XML ainda aguardado':''}`;"
+        if status_tail not in text:
+            raise RuntimeError("Cauda de status do watcher não encontrada")
+        text = text.replace(status_tail, status_tail_new, 1)
 
     path.write_text(text, encoding="utf-8", newline="\n")
-    print("app.js atualizado: instância única + abertura externa em abas + etiqueta da empresa")
+    print("app.js atualizado: abas + Localizador com preenchimento reforçado e timer terminal")
 
 
 def patch_css(path: Path) -> None:
