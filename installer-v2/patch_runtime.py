@@ -4,6 +4,21 @@ import sys
 from pathlib import Path
 
 MARKER = "CSM_MULTI_TAB_BRIDGE_V1"
+BROKER = "http://127.0.0.1:47878"
+
+
+def patch_index(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    if BROKER in text:
+        print("index.html já permite o broker local")
+        return
+    old = "connect-src 'self';"
+    new = f"connect-src 'self' {BROKER};"
+    if old not in text:
+        raise RuntimeError("Diretiva connect-src esperada não encontrada em index.html")
+    text = text.replace(old, new, 1)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    print("index.html atualizado: CSP permite somente o broker local 127.0.0.1:47878")
 
 
 def patch_app_js(path: Path) -> None:
@@ -98,10 +113,12 @@ def main() -> int:
         print("uso: patch_runtime.py <pasta-web>", file=sys.stderr)
         return 2
     web = Path(sys.argv[1])
+    index = web / "index.html"
     app = web / "app.js"
     refinement = web / "refinement.css"
-    if not app.is_file() or not refinement.is_file():
+    if not index.is_file() or not app.is_file() or not refinement.is_file():
         raise SystemExit(f"Arquivos web não encontrados em {web}")
+    patch_index(index)
     patch_app_js(app)
     patch_css(refinement)
     return 0
