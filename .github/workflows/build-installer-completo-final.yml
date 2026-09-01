@@ -57,12 +57,14 @@ jobs:
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Executável principal ausente após extração" }
           if (!(Test-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico")) { throw "Ícone oficial ausente após extração" }
 
-      - name: Aplicar abas externas, etiquetas e tema claro
+      - name: Aplicar abas, etiquetas, tema e Localizador
         shell: pwsh
         run: |
           python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
           node --check "installer-v2/payload/_internal/web/app.js"
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Bridge de abas não aplicado" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_LOCATOR_FIX_V1" -Quiet)) { throw "Correção do Localizador não aplicada" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "lookup-automation" -Quiet)) { throw "Frontend não chama o reforço de preenchimento" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Correção visual não aplicada" }
 
       - name: Aplicar instancia unica estrita
@@ -70,6 +72,17 @@ jobs:
         run: |
           python installer-v2/patch_launcher_single_instance.py
           if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_SINGLE_INSTANCE_STRICT_V2" -Quiet)) { throw "Patch de instancia unica estrita nao aplicado" }
+
+      - name: Aplicar automação reforçada do Consulta DANFE
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_lookup.py
+          if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_LOOKUP_AUTOMATION_V1" -Quiet)) { throw "Broker do Localizador não aplicado" }
+          New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
+          Copy-Item -Force "installer-v2/launcher/consulta_danfe_uia.ps1" "installer-v2/payload/_internal/csm/consulta_danfe_uia.ps1"
+          $tokens=$null; $errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "installer-v2/launcher/consulta_danfe_uia.ps1"), [ref]$tokens, [ref]$errors) | Out-Null
+          if($errors.Count -gt 0){ throw ($errors | Out-String) }
 
       - name: Integrar launcher de instância única e recuperação
         shell: pwsh
@@ -85,6 +98,7 @@ jobs:
             "installer-v2/launcher/main.go"
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher não gerado" }
           if (!(Test-Path $core)) { throw "Core original não preservado" }
+          if (!(Test-Path "installer-v2/payload/_internal/csm/consulta_danfe_uia.ps1")) { throw "Helper do Consulta DANFE não empacotado" }
           $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
           if ($self.ExitCode -ne 0) { throw "Self-test do launcher falhou: $($self.ExitCode)" }
 
@@ -120,6 +134,16 @@ jobs:
         shell: pwsh
         run: ./installer-v2/test_installed.ps1
 
+      - name: Validar artefatos do Localizador
+        shell: pwsh
+        run: |
+          $installedWeb = Join-Path $env:TEMP "csm-locator-static-test"
+          Remove-Item $installedWeb -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $installedWeb | Out-Null
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "A consulta automática foi encerrada" -Quiet)) { throw "Timer terminal do Localizador ausente" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "lookup-automation" -Quiet)) { throw "Preenchimento reforçado do Localizador ausente" }
+          if (!(Test-Path "installer-v2/payload/_internal/csm/consulta_danfe_uia.ps1")) { throw "Helper UIA ausente" }
+
       - name: Gerar checksum
         shell: pwsh
         run: |
@@ -131,7 +155,7 @@ jobs:
       - name: Publicar artefato de homologação
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Instalacao-Limpa
+          name: CSMVisualizadorXML-Localizador-Fix
           path: |
             dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe
             dist/CSMVisualizadorXML-Instalador-Completo-Limpo-SHA256.txt
