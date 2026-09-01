@@ -146,10 +146,8 @@ jobs:
           if ($launchTest.ExitCode -ne 0) { throw "Launcher instalado falhou no self-test" }
 
           $sample = Join-Path $env:TEMP "CSM Visualizador XML teste.xml"
-          @'
-<?xml version="1.0" encoding="UTF-8"?>
-<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe35260811129502000486550010000342541000000000" versao="4.00"><ide><cUF>35</cUF><mod>55</mod><serie>16</serie><nNF>34254</nNF><dhEmi>2026-08-16T00:00:00-03:00</dhEmi><tpNF>1</tpNF></ide><emit><CNPJ>11129502000486</CNPJ><xNome>PIRUETA COMERCIAL LTDA</xNome></emit><dest><CPF>00000000191</CPF><xNome>CONSUMIDOR NAO IDENTIFICADO</xNome></dest><total><ICMSTot><vProd>23.89</vProd><vNF>23.89</vNF></ICMSTot></total></infNFe></NFe>
-'@ | Set-Content -Encoding utf8 $sample
+          $sampleXml = '<?xml version="1.0" encoding="UTF-8"?><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe35260811129502000486550010000342541000000000" versao="4.00"><ide><cUF>35</cUF><mod>55</mod><serie>16</serie><nNF>34254</nNF><dhEmi>2026-08-16T00:00:00-03:00</dhEmi><tpNF>1</tpNF></ide><emit><CNPJ>11129502000486</CNPJ><xNome>PIRUETA COMERCIAL LTDA</xNome></emit><dest><CPF>00000000191</CPF><xNome>CONSUMIDOR NAO IDENTIFICADO</xNome></dest><total><ICMSTot><vProd>23.89</vProd><vNF>23.89</vNF></ICMSTot></total></infNFe></NFe>'
+          Set-Content -Path $sample -Value $sampleXml -Encoding utf8
 
           $primary = Start-Process -FilePath $main -PassThru
           $health = $null
