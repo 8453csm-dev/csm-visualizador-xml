@@ -3,10 +3,16 @@
 package main
 
 import (
+    "encoding/json"
+    "fmt"
+    "io"
+    "net"
+    "net/http"
     "os"
     "os/exec"
     "path/filepath"
     "strings"
+    "sync"
     "syscall"
     "time"
     "unsafe"
@@ -17,10 +23,14 @@ const (
     swShow            = 5
     swRestore         = 9
     swpShowWindow     = 0x0040
+    swpNoSize         = 0x0001
+    swpNoMove         = 0x0002
     smXVirtualScreen  = 76
     smYVirtualScreen  = 77
     smCXVirtualScreen = 78
     smCYVirtualScreen = 79
+    brokerAddress     = "127.0.0.1:47878"
+    brokerURL         = "http://127.0.0.1:47878"
 )
 
 var (
@@ -34,7 +44,6 @@ var (
     procEnumWindows              = user32.NewProc("EnumWindows")
     procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
     procIsWindowVisible          = user32.NewProc("IsWindowVisible")
-    procIsIconic                 = user32.NewProc("IsIconic")
     procShowWindow               = user32.NewProc("ShowWindow")
     procShowWindowAsync          = user32.NewProc("ShowWindowAsync")
     procSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
@@ -68,8 +77,21 @@ type windowCandidate struct {
     hwnd    uintptr
     title   string
     visible bool
-    iconic  bool
     rect    rect
+}
+
+type openRequest struct {
+    Paths []string `json:"paths"`
+}
+
+type broker struct {
+    mu          sync.Mutex
+    core        string
+    dir         string
+    corePID     uint32
+    pending     []string
+    subscribers map[chan string]struct{}
+    lastActive  time.Time
 }
 
 func utf16ToString(v []uint16) string {
@@ -100,6 +122,18 @@ func processIDsByName(name string) []uint32 {
     return result
 }
 
+func pidExists(pid uint32, name string) bool {
+    if pid == 0 {
+        return false
+    }
+    for _, p := range processIDsByName(name) {
+        if p == pid {
+            return true
+        }
+    }
+    return false
+}
+
 func windowTitle(hwnd uintptr) string {
     n, _, _ := procGetWindowTextLengthW.Call(hwnd)
     if n == 0 {
@@ -125,8 +159,7 @@ func windowsForPID(pid uint32) []windowCandidate {
         var r rect
         procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
         vis, _, _ := procIsWindowVisible.Call(hwnd)
-        ico, _, _ := procIsIconic.Call(hwnd)
-        out = append(out, windowCandidate{hwnd: hwnd, title: title, visible: vis != 0, iconic: ico != 0, rect: r})
+        out = append(out, windowCandidate{hwnd: hwnd, title: title, visible: vis != 0, rect: r})
         return 1
     })
     procEnumWindows.Call(cb, 0)
@@ -187,7 +220,7 @@ func recoverWindow(pid uint32) bool {
         nx, ny := int32(x)+80, int32(y)+80
         procSetWindowPos.Call(w.hwnd, 0, uintptr(nx), uintptr(ny), uintptr(width), uintptr(height), swpShowWindow)
     } else {
-        procSetWindowPos.Call(w.hwnd, 0, 0, 0, 0, 0, swpShowWindow|0x0001|0x0002)
+        procSetWindowPos.Call(w.hwnd, 0, 0, 0, 0, 0, swpShowWindow|swpNoSize|swpNoMove)
     }
 
     procBringWindowToTop.Call(w.hwnd)
@@ -221,15 +254,301 @@ func corePath() (string, string, error) {
     return core, dir, nil
 }
 
-func waitAndRecover(pid uint32, timeout time.Duration) bool {
-    deadline := time.Now().Add(timeout)
-    for time.Now().Before(deadline) {
-        if recoverWindow(pid) {
-            return true
+func normalizePaths(args []string) []string {
+    seen := map[string]bool{}
+    out := make([]string, 0, len(args))
+    for _, a := range args {
+        if strings.HasPrefix(a, "--") || strings.TrimSpace(a) == "" {
+            continue
         }
-        time.Sleep(80 * time.Millisecond)
+        p := strings.Trim(strings.TrimSpace(a), "\"")
+        if abs, err := filepath.Abs(p); err == nil {
+            p = abs
+        }
+        if _, err := os.Stat(p); err != nil {
+            continue
+        }
+        key := strings.ToLower(p)
+        if !seen[key] {
+            seen[key] = true
+            out = append(out, p)
+        }
     }
-    return false
+    return out
+}
+
+func postExisting(paths []string) bool {
+    client := &http.Client{Timeout: 900 * time.Millisecond}
+    endpoint := brokerURL + "/activate"
+    var body io.Reader
+    if len(paths) > 0 {
+        endpoint = brokerURL + "/open"
+        data, _ := json.Marshal(openRequest{Paths: paths})
+        body = strings.NewReader(string(data))
+    }
+    req, err := http.NewRequest(http.MethodPost, endpoint, body)
+    if err != nil {
+        return false
+    }
+    req.Header.Set("Content-Type", "application/json")
+    resp, err := client.Do(req)
+    if err != nil {
+        return false
+    }
+    defer resp.Body.Close()
+    return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+func newBroker(core, dir string) *broker {
+    return &broker{
+        core:        core,
+        dir:         dir,
+        subscribers: make(map[chan string]struct{}),
+        lastActive:  time.Now(),
+    }
+}
+
+func (b *broker) setCorePID(pid uint32) {
+    b.mu.Lock()
+    b.corePID = pid
+    b.lastActive = time.Now()
+    b.mu.Unlock()
+}
+
+func (b *broker) getCorePID() uint32 {
+    b.mu.Lock()
+    defer b.mu.Unlock()
+    return b.corePID
+}
+
+func (b *broker) startCore() error {
+    cmd := exec.Command(b.core)
+    cmd.Dir = b.dir
+    if err := cmd.Start(); err != nil {
+        return err
+    }
+    pid := uint32(cmd.Process.Pid)
+    _ = cmd.Process.Release()
+    b.setCorePID(pid)
+    return nil
+}
+
+func (b *broker) adoptOrStartCore() error {
+    existing := processIDsByName("CSM Visualizador XML Core.exe")
+    var keep uint32
+    for _, pid := range existing {
+        if keep == 0 && recoverWindow(pid) {
+            keep = pid
+            continue
+        }
+        killPID(pid)
+    }
+    if keep != 0 {
+        b.setCorePID(keep)
+        return nil
+    }
+    time.Sleep(180 * time.Millisecond)
+    return b.startCore()
+}
+
+func (b *broker) ensureHealthyCore() error {
+    pid := b.getCorePID()
+    if pid != 0 && pidExists(pid, "CSM Visualizador XML Core.exe") {
+        deadline := time.Now().Add(2 * time.Second)
+        for time.Now().Before(deadline) {
+            if recoverWindow(pid) {
+                return nil
+            }
+            time.Sleep(120 * time.Millisecond)
+        }
+        killPID(pid)
+        deadline = time.Now().Add(1800 * time.Millisecond)
+        for time.Now().Before(deadline) && pidExists(pid, "CSM Visualizador XML Core.exe") {
+            time.Sleep(80 * time.Millisecond)
+        }
+        b.setCorePID(0)
+    }
+    return b.startCore()
+}
+
+func (b *broker) queuePath(path string) {
+    path = strings.TrimSpace(path)
+    if path == "" {
+        return
+    }
+    b.mu.Lock()
+    b.lastActive = time.Now()
+    if len(b.subscribers) == 0 {
+        for _, existing := range b.pending {
+            if strings.EqualFold(existing, path) {
+                b.mu.Unlock()
+                return
+            }
+        }
+        b.pending = append(b.pending, path)
+        b.mu.Unlock()
+        return
+    }
+    chans := make([]chan string, 0, len(b.subscribers))
+    for ch := range b.subscribers {
+        chans = append(chans, ch)
+    }
+    b.mu.Unlock()
+    for _, ch := range chans {
+        select {
+        case ch <- path:
+        default:
+        }
+    }
+}
+
+func (b *broker) addSubscriber(ch chan string) []string {
+    b.mu.Lock()
+    defer b.mu.Unlock()
+    b.subscribers[ch] = struct{}{}
+    pending := append([]string(nil), b.pending...)
+    b.pending = nil
+    b.lastActive = time.Now()
+    return pending
+}
+
+func (b *broker) removeSubscriber(ch chan string) {
+    b.mu.Lock()
+    delete(b.subscribers, ch)
+    b.mu.Unlock()
+}
+
+func setCORS(w http.ResponseWriter) {
+    w.Header().Set("Access-Control-Allow-Origin", "*")
+    w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+    w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+}
+
+func (b *broker) handleOpen(w http.ResponseWriter, r *http.Request) {
+    setCORS(w)
+    if r.Method == http.MethodOptions {
+        w.WriteHeader(http.StatusNoContent)
+        return
+    }
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    var req openRequest
+    if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+        http.Error(w, "invalid request", http.StatusBadRequest)
+        return
+    }
+    paths := normalizePaths(req.Paths)
+    if err := b.ensureHealthyCore(); err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    for _, p := range paths {
+        b.queuePath(p)
+    }
+    w.Header().Set("Content-Type", "application/json")
+    _ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "count": len(paths)})
+}
+
+func (b *broker) handleActivate(w http.ResponseWriter, r *http.Request) {
+    setCORS(w)
+    if r.Method == http.MethodOptions {
+        w.WriteHeader(http.StatusNoContent)
+        return
+    }
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    if err := b.ensureHealthyCore(); err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    w.Header().Set("Content-Type", "application/json")
+    _, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+func writeEvent(w io.Writer, path string) {
+    data, _ := json.Marshal(map[string]string{"path": path})
+    _, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+}
+
+func (b *broker) handleEvents(w http.ResponseWriter, r *http.Request) {
+    setCORS(w)
+    if r.Method != http.MethodGet {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, "stream unsupported", http.StatusInternalServerError)
+        return
+    }
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+    ch := make(chan string, 32)
+    pending := b.addSubscriber(ch)
+    defer b.removeSubscriber(ch)
+
+    _, _ = fmt.Fprint(w, ": CSM Visualizador XML broker\n\n")
+    for _, p := range pending {
+        writeEvent(w, p)
+    }
+    flusher.Flush()
+
+    ticker := time.NewTicker(12 * time.Second)
+    defer ticker.Stop()
+    for {
+        select {
+        case <-r.Context().Done():
+            return
+        case p := <-ch:
+            writeEvent(w, p)
+            flusher.Flush()
+        case <-ticker.C:
+            _, _ = fmt.Fprint(w, ": ping\n\n")
+            flusher.Flush()
+        }
+    }
+}
+
+func (b *broker) handleHealth(w http.ResponseWriter, r *http.Request) {
+    setCORS(w)
+    b.mu.Lock()
+    info := map[string]any{
+        "ok":          true,
+        "core_pid":    b.corePID,
+        "subscribers": len(b.subscribers),
+        "pending":     len(b.pending),
+    }
+    b.mu.Unlock()
+    w.Header().Set("Content-Type", "application/json")
+    _ = json.NewEncoder(w).Encode(info)
+}
+
+func (b *broker) supervise() {
+    ticker := time.NewTicker(1 * time.Second)
+    defer ticker.Stop()
+    noCoreSince := time.Time{}
+    for range ticker.C {
+        pid := b.getCorePID()
+        if pid != 0 && pidExists(pid, "CSM Visualizador XML Core.exe") {
+            noCoreSince = time.Time{}
+            continue
+        }
+        if pid != 0 {
+            b.setCorePID(0)
+        }
+        if noCoreSince.IsZero() {
+            noCoreSince = time.Now()
+            continue
+        }
+        if time.Since(noCoreSince) > 4*time.Second {
+            os.Exit(0)
+        }
+    }
 }
 
 func main() {
@@ -243,50 +562,50 @@ func main() {
         return
     }
 
-    args := os.Args[1:]
-    existing := processIDsByName("CSM Visualizador XML Core.exe")
-
-    if len(args) == 0 {
-        for _, pid := range existing {
-            if recoverWindow(pid) {
-                return
-            }
-        }
-        if len(existing) > 0 {
-            time.Sleep(700 * time.Millisecond)
-            for _, pid := range existing {
-                if !recoverWindow(pid) {
-                    killPID(pid)
-                } else {
-                    return
-                }
-            }
-            time.Sleep(250 * time.Millisecond)
-        }
-    } else {
-        for _, pid := range existing {
-            if !recoverWindow(pid) {
-                killPID(pid)
-            }
-        }
+    paths := normalizePaths(os.Args[1:])
+    if postExisting(paths) {
+        return
     }
 
-    cmd := exec.Command(core, args...)
-    cmd.Dir = dir
-    if err := cmd.Start(); err != nil {
+    ln, err := net.Listen("tcp", brokerAddress)
+    if err != nil {
+        time.Sleep(180 * time.Millisecond)
+        if postExisting(paths) {
+            return
+        }
+        messageBox("O CSM Visualizador XML já está iniciando, mas não respondeu ao comando. Tente novamente em alguns segundos.", "CSM Visualizador XML")
+        return
+    }
+
+    b := newBroker(core, dir)
+    mux := http.NewServeMux()
+    mux.HandleFunc("/open", b.handleOpen)
+    mux.HandleFunc("/activate", b.handleActivate)
+    mux.HandleFunc("/events", b.handleEvents)
+    mux.HandleFunc("/health", b.handleHealth)
+    server := &http.Server{Handler: mux, ReadHeaderTimeout: 2 * time.Second}
+    go func() { _ = server.Serve(ln) }()
+    go b.supervise()
+
+    if err := b.adoptOrStartCore(); err != nil {
+        _ = server.Close()
         messageBox("Não foi possível iniciar o CSM Visualizador XML.\n\n"+err.Error(), "CSM Visualizador XML")
         return
     }
 
-    if waitAndRecover(uint32(cmd.Process.Pid), 12*time.Second) {
-        return
+    for _, p := range paths {
+        b.queuePath(p)
     }
 
-    for _, pid := range processIDsByName("CSM Visualizador XML Core.exe") {
+    pid := b.getCorePID()
+    deadline := time.Now().Add(12 * time.Second)
+    for time.Now().Before(deadline) {
         if recoverWindow(pid) {
-            return
+            break
         }
+        time.Sleep(90 * time.Millisecond)
     }
 
-    messageBox("O CSM Visualizador XML iniciou, mas a janela não ficou disponível. O launcher tentou restaurá-la automaticamente. Se isso se repetir, reinstale esta correção.", "CSM Visualizador XML")
+    // Permanece sem janela enquanto o Core estiver aberto e recebe os próximos XMLs.
+    select {}
 }
