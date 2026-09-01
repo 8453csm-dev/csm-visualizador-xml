@@ -24,9 +24,12 @@ function companyTabLabel(doc){
  if(digits.length===14){const establishment=digits.slice(8,12);branch=establishment==='0001'?'MATRIZ':'FILIAL'}
  return [first,branch].filter(Boolean).join(' • ')
 }
+async function acknowledgeExternalDocument(path){
+ try{await fetch('http://127.0.0.1:47878/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})})}catch(_){}
+}
 async function openExternalDocument(path){
  path=String(path||'').trim();if(!path)return;
- try{await waitApi();const result=await window.pywebview.api.open_recent(path);handleLoadResult(result)}catch(e){toast(`Não foi possível abrir ${path.split(/[\\/]/).pop()||'o XML'}: ${e?.message||e}`,true)}
+ try{await waitApi();const result=await window.pywebview.api.open_recent(path);handleLoadResult(result);await acknowledgeExternalDocument(path)}catch(e){toast(`Não foi possível abrir ${path.split(/[\\/]/).pop()||'o XML'}: ${e?.message||e}`,true)}
 }
 function setupExternalOpenBridge(){
  if(!('EventSource' in window))return;
