@@ -65,6 +65,12 @@ jobs:
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Bridge de abas não aplicado" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Correção visual não aplicada" }
 
+      - name: Aplicar instancia unica estrita
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_SINGLE_INSTANCE_STRICT_V2" -Quiet)) { throw "Patch de instancia unica estrita nao aplicado" }
+
       - name: Integrar launcher de instância única e recuperação
         shell: pwsh
         run: |
@@ -119,7 +125,7 @@ jobs:
       - name: Publicar artefato de homologação
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Abas-Fix
+          name: CSMVisualizadorXML-Abas-Fix-v2
           path: |
             dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe
             dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix-SHA256.txt
