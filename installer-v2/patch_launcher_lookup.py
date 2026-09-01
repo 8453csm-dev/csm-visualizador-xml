@@ -1,11 +1,11 @@
 from pathlib import Path
 
-MARKER = "CSM_LOOKUP_AUTOMATION_V1"
+MARKER = "CSM_LOOKUP_AUTOMATION_V2"
 path = Path("installer-v2/launcher/main.go")
 text = path.read_text(encoding="utf-8")
 
 if MARKER in text:
-    print("Launcher ja possui automacao reforcada do Localizador")
+    print("Launcher ja possui automacao compilada do Localizador")
     raise SystemExit(0)
 
 anchor_types = 'type openRequest struct { Paths []string `json:"paths"` }\ntype ackRequest struct { Path string `json:"path"` }\n'
@@ -16,7 +16,7 @@ text = text.replace(anchor_types, anchor_types + '''type lookupAutomationRequest
 anchor_cors = 'func setCORS(w http.ResponseWriter) {\n'
 if anchor_cors not in text:
     raise RuntimeError("Ancora setCORS nao encontrada")
-helpers = r'''// CSM_LOOKUP_AUTOMATION_V1
+helpers = r'''// CSM_LOOKUP_AUTOMATION_V2
 func validLookupKey(value string) string {
     value = strings.ToUpper(strings.TrimSpace(value))
     var b strings.Builder
@@ -41,9 +41,9 @@ func (b *broker) handleLookupAutomation(w http.ResponseWriter, r *http.Request) 
         _, _ = w.Write([]byte(`{"ok":true,"started":false}`))
         return
     }
-    script := filepath.Join(b.dir, "_internal", "csm", "consulta_danfe_uia.ps1")
-    if _, err := os.Stat(script); err != nil { http.Error(w, "lookup helper unavailable", http.StatusInternalServerError); return }
-    cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script, "-Key", key)
+    helper := filepath.Join(b.dir, "_internal", "csm", "CSM Consulta DANFE Helper.exe")
+    if _, err := os.Stat(helper); err != nil { http.Error(w, "lookup helper unavailable", http.StatusInternalServerError); return }
+    cmd := exec.Command(helper, key)
     cmd.Dir = b.dir
     cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
     if err := cmd.Start(); err != nil { http.Error(w, err.Error(), http.StatusInternalServerError); return }
@@ -61,4 +61,4 @@ if mux_anchor not in text:
 text = text.replace(mux_anchor, mux_anchor + '    mux.HandleFunc("/lookup-automation", b.handleLookupAutomation)\n', 1)
 
 path.write_text(text, encoding="utf-8", newline="\n")
-print("Launcher atualizado: broker pode reforcar o preenchimento do Consulta DANFE")
+print("Launcher atualizado: broker usa helper Windows compilado, sem PowerShell")
