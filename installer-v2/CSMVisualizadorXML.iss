@@ -1,8 +1,9 @@
 #define AppName "CSM Visualizador XML"
-#define AppVersion "3.7.8.10"
+#define AppVersion "3.7.8.11"
 #define Publisher "CSM - Contabilidade São Mateus"
 #define AppExe "CSM Visualizador XML.exe"
 #define CoreExe "CSM Visualizador XML Core.exe"
+#define XmlProgId "CSM.VisualizadorXML.xml"
 
 [Setup]
 AppId={{B04F9B6B-49E4-4F4D-BC98-7F9D0C3A4A87}
@@ -29,7 +30,7 @@ SetupIconFile=payload\_internal\assets\CSMVisualizadorXML.ico
 UninstallDisplayName=CSM Visualizador XML
 UninstallDisplayIcon={app}\_internal\assets\CSMVisualizadorXML.ico
 OutputDir=..\dist
-OutputBaseFilename=CSMVisualizadorXML-Instalador-Completo-Abas-Fix
+OutputBaseFilename=CSMVisualizadorXML-Instalador-Completo-Limpo
 Compression=lzma2/max
 SolidCompression=yes
 CloseApplications=yes
@@ -37,10 +38,13 @@ RestartApplications=no
 AllowNoIcons=no
 MinVersion=10.0
 VersionInfoCompany={#Publisher}
-VersionInfoDescription=Instalador completo do CSM Visualizador XML com instância única, abas externas e recuperação de janela
+VersionInfoDescription=Instalador completo do CSM Visualizador XML com instalação limpa, instância única e associação XML
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-VersionInfoVersion=3.7.8.10
+VersionInfoVersion=3.7.8.11
+
+[Tasks]
+Name: "defaultxml"; Description: "Escolher o CSM Visualizador XML como aplicativo padrão para arquivos XML"; GroupDescription: "Arquivos XML:"; Flags: checkedonce
 
 [Files]
 Source: "payload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -51,10 +55,24 @@ Name: "{userprograms}\CSM Visualizador XML\CSM Visualizador XML"; Filename: "{ap
 Name: "{userprograms}\CSM Visualizador XML\Desinstalar CSM Visualizador XML"; Filename: "{uninstallexe}"; IconFilename: "{app}\_internal\assets\CSMVisualizadorXML.ico"
 
 [Registry]
+; Aplicativo e comando de abertura atuais
+Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "CSM Visualizador XML"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe\SupportedTypes"; ValueType: string; ValueName: ".xml"; ValueData: ""; Flags: uninsdeletekey
 
+; ProgID exclusivo do Visualizador
+Root: HKCU; Subkey: "Software\Classes\{#XmlProgId}"; ValueType: string; ValueName: ""; ValueData: "Documento XML - CSM Visualizador XML"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#XmlProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\_internal\assets\CSMVisualizadorXML.ico"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#XmlProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Flags: uninsdeletekey
+
+; Registro oficial em Aplicativos Padrão do Windows
+Root: HKCU; Subkey: "Software\CSM\CSM Visualizador XML\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "CSM Visualizador XML"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\CSM\CSM Visualizador XML\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Visualizador e analisador de documentos fiscais XML da CSM"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\CSM\CSM Visualizador XML\Capabilities\FileAssociations"; ValueType: string; ValueName: ".xml"; ValueData: "{#XmlProgId}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "CSM Visualizador XML"; ValueData: "Software\CSM\CSM Visualizador XML\Capabilities"; Flags: uninsdeletevalue
+
 [Run]
+Filename: "ms-settings:defaultapps?registeredAppUser=CSM%20Visualizador%20XML"; Description: "Escolher CSM Visualizador XML como padrão para arquivos XML"; Flags: shellexec postinstall skipifsilent; Tasks: defaultxml
 Filename: "{app}\{#AppExe}"; Description: "Abrir CSM Visualizador XML"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -70,6 +88,11 @@ const
   CSMBlue = $00663B0F;
   CSMGreen = $006BA928;
   MutedText = $00807066;
+  SHCNE_ASSOCCHANGED = $08000000;
+  SHCNF_IDLIST = $0000;
+
+procedure SHChangeNotify(wEventId, uFlags: LongWord; dwItem1, dwItem2: Longint);
+  external 'SHChangeNotify@shell32.dll stdcall';
 
 procedure KillOldProcesses;
 var
@@ -78,6 +101,15 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "CSM Visualizador XML.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "CSM Visualizador XML Core.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "CSMVisualizadorXML.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "CSMVisualizadorXML-4.0.0-alpha.1.exe"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure RunOldUninstaller(const P: String);
+var
+  ResultCode: Integer;
+begin
+  if FileExists(P) then
+    Exec(P, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure RemoveDirIfExists(const P: String);
@@ -91,6 +123,18 @@ begin
   if FileExists(P) then DeleteFile(P);
 end;
 
+procedure RemoveOldAssociations;
+begin
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Applications\CSM Visualizador XML.exe');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Applications\CSMVisualizadorXML.exe');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\Applications\CSM Visualizador XML Core.exe');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\CSM.VisualizadorXML.xml');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Classes\CSMVisualizadorXML.xml');
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\CSM\CSM Visualizador XML\Capabilities');
+  RegDeleteValue(HKCU, 'Software\RegisteredApplications', 'CSM Visualizador XML');
+  RegDeleteValue(HKCU, 'Software\RegisteredApplications', 'CSMVisualizadorXML');
+end;
+
 procedure RemoveOldRegistry;
 begin
   RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\CSMVisualizadorXML');
@@ -99,13 +143,30 @@ begin
   RegDeleteKeyIncludingSubkeys(HKLM64, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\CSMVisualizadorXML');
   RegDeleteKeyIncludingSubkeys(HKLM32, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{B04F9B6B-49E4-4F4D-BC98-7F9D0C3A4A87}_is1');
   RegDeleteKeyIncludingSubkeys(HKLM64, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{B04F9B6B-49E4-4F4D-BC98-7F9D0C3A4A87}_is1');
+  RemoveOldAssociations;
+end;
+
+procedure RunKnownOldUninstallers;
+begin
+  RunOldUninstaller(ExpandConstant('{localappdata}\CSM Visualizador XML\unins000.exe'));
+  RunOldUninstaller(ExpandConstant('{localappdata}\Programs\CSM Visualizador XML\unins000.exe'));
+  RunOldUninstaller(ExpandConstant('{localappdata}\Programs\CSMVisualizadorXML\unins000.exe'));
+  RunOldUninstaller(ExpandConstant('{autopf}\CSM Visualizador XML\unins000.exe'));
+  RunOldUninstaller(ExpandConstant('{autopf}\CSMVisualizadorXML\unins000.exe'));
+  if IsWin64 then begin
+    RunOldUninstaller(ExpandConstant('{autopf32}\CSM Visualizador XML\unins000.exe'));
+    RunOldUninstaller(ExpandConstant('{autopf32}\CSMVisualizadorXML\unins000.exe'));
+  end;
 end;
 
 procedure CleanPreviousVersions;
 begin
-  WizardForm.StatusLabel.Caption := 'Removendo versões anteriores do CSM Visualizador XML...';
+  WizardForm.StatusLabel.Caption := 'Removendo completamente versões anteriores...';
   KillOldProcesses;
-  Sleep(400);
+  Sleep(350);
+  RunKnownOldUninstallers;
+  KillOldProcesses;
+  Sleep(350);
 
   RemoveDirIfExists(ExpandConstant('{localappdata}\CSM Visualizador XML'));
   RemoveDirIfExists(ExpandConstant('{localappdata}\CSMVisualizadorXML'));
@@ -119,24 +180,27 @@ begin
     RemoveDirIfExists(ExpandConstant('{autopf32}\CSMVisualizadorXML'));
   end;
   RemoveDirIfExists(ExpandConstant('{userappdata}\CSM Visualizador XML'));
+  RemoveDirIfExists(ExpandConstant('{userappdata}\CSMVisualizadorXML'));
 
   RemoveFileIfExists(ExpandConstant('{userdesktop}\CSM Visualizador XML.lnk'));
   RemoveFileIfExists(ExpandConstant('{userdesktop}\CSMVisualizadorXML.lnk'));
   RemoveDirIfExists(ExpandConstant('{userprograms}\CSM Visualizador XML'));
+  RemoveDirIfExists(ExpandConstant('{userprograms}\CSMVisualizadorXML'));
 
   RemoveOldRegistry;
+  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, 0, 0);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   CleanPreviousVersions;
-  WizardForm.StatusLabel.Caption := 'Preparando a nova instalação...';
+  WizardForm.StatusLabel.Caption := 'Preparando a nova instalação limpa...';
 end;
 
 procedure InitializeWizard;
 begin
-  WizardForm.Caption := 'CSM Visualizador XML  •  Instalação';
+  WizardForm.Caption := 'CSM Visualizador XML  •  Instalação limpa';
   WizardForm.Font.Name := 'Segoe UI';
   WizardForm.Font.Size := 9;
 
@@ -147,14 +211,15 @@ begin
   WizardForm.WelcomeLabel1.Font.Color := CSMBlue;
 
   WizardForm.WelcomeLabel2.Caption :=
-    'Instalação limpa e segura do CSM Visualizador XML.' + #13#10 + #13#10 +
+    'Esta instalação fará uma limpeza completa das versões anteriores.' + #13#10 + #13#10 +
+    '• Fecha processos antigos do Visualizador' + #13#10 +
+    '• Remove instalações, atalhos e registros antigos' + #13#10 +
+    '• Remove associações antigas que apontem para executáveis anteriores' + #13#10 +
+    '• Instala somente a versão atual do CSM Visualizador XML' + #13#10 +
     '• Mantém somente uma instância do Visualizador aberta' + #13#10 +
     '• Novos XMLs abrem em abas no mesmo aplicativo' + #13#10 +
-    '• Mostra a empresa e MATRIZ/FILIAL na aba da nota' + #13#10 +
-    '• Corrige contraste das informações no tema claro' + #13#10 +
-    '• Reforça a recuperação de janela invisível ou presa' + #13#10 +
-    '• Mantém a Aba XML otimizada com sintaxe e cores' + #13#10 +
-    '• Remove automaticamente versões anteriores' + #13#10 +
+    '• Registra o novo Visualizador nos Aplicativos Padrão do Windows' + #13#10 +
+    '• Ao final, permite escolher o CSM como padrão para arquivos XML' + #13#10 +
     '• Cria atalho e desinstalador integrado ao Windows' + #13#10 + #13#10 +
     'Clique em Avançar para continuar.';
   WizardForm.WelcomeLabel2.Font.Color := MutedText;
@@ -170,17 +235,23 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpReady then begin
-    WizardForm.PageNameLabel.Caption := 'Tudo pronto para instalar';
-    WizardForm.PageDescriptionLabel.Caption := 'A versão anterior será removida e a nova correção será instalada.';
+    WizardForm.PageNameLabel.Caption := 'Tudo pronto para a instalação limpa';
+    WizardForm.PageDescriptionLabel.Caption := 'Versões antigas serão removidas antes da instalação da versão atual.';
     WizardForm.NextButton.Caption := 'Instalar';
   end else if CurPageID = wpInstalling then begin
     WizardForm.PageNameLabel.Caption := 'Instalando CSM Visualizador XML';
-    WizardForm.PageDescriptionLabel.Caption := 'Aguarde enquanto o software é instalado.';
+    WizardForm.PageDescriptionLabel.Caption := 'Limpando versões anteriores e instalando a versão atual.';
   end else if CurPageID = wpFinished then begin
     WizardForm.PageNameLabel.Caption := 'Instalação concluída';
-    WizardForm.PageDescriptionLabel.Caption := 'O CSM Visualizador XML está pronto para uso.';
+    WizardForm.PageDescriptionLabel.Caption := 'Marque a opção para escolher o CSM Visualizador XML como padrão para arquivos XML.';
     WizardForm.NextButton.Caption := 'Concluir';
   end else begin
     WizardForm.NextButton.Caption := 'Avançar';
   end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, 0, 0);
 end;
