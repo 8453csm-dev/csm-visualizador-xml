@@ -15,6 +15,7 @@ public static class CSMInput {
 }
 "@
 
+# CSM_LOOKUP_DOWNLOAD_V2
 $logDir = Join-Path $env:LOCALAPPDATA 'CSM Visualizador XML\logs'
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $log = Join-Path $logDir 'consulta-danfe-automacao.log'
@@ -78,6 +79,61 @@ function TryInvokeSearch($win) {
   }
   return $false
 }
+function TryInvokeElement($element,[string]$label) {
+  try {
+    $ip=[System.Windows.Automation.InvokePattern]$element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    $ip.Invoke(); Log ('Download acionado via InvokePattern: '+$label); return $true
+  } catch {}
+  try {
+    $sp=[System.Windows.Automation.SelectionItemPattern]$element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $sp.Select(); Log ('Download acionado via SelectionItemPattern: '+$label); return $true
+  } catch {}
+  try {
+    $element.SetFocus(); Start-Sleep -Milliseconds 80
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Log ('Download acionado por foco/ENTER: '+$label); return $true
+  } catch {}
+  try {
+    $r=$element.Current.BoundingRectangle
+    if($r.Width -gt 4 -and $r.Height -gt 4){
+      ClickPoint ([int]($r.Left+$r.Width/2)) ([int]($r.Top+$r.Height/2))
+      Log ('Download acionado por clique no centro do controle: '+$label); return $true
+    }
+  } catch {}
+  return $false
+}
+function TryInvokeDownloadXml($win) {
+  $types=@(
+    [System.Windows.Automation.ControlType]::Button,
+    [System.Windows.Automation.ControlType]::Hyperlink,
+    [System.Windows.Automation.ControlType]::Text,
+    [System.Windows.Automation.ControlType]::Custom
+  )
+  $all=$win.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $candidates=@()
+  foreach($e in $all){
+    try {
+      $ct=$e.Current.ControlType
+      if($types -notcontains $ct){ continue }
+      $n=[string]$e.Current.Name
+      $help=[string]$e.Current.HelpText
+      $aid=[string]$e.Current.AutomationId
+      $text=($n+' '+$help+' '+$aid).Trim()
+      $low=$text.ToLowerInvariant()
+      $score=0
+      if($low -match 'baixar\s+xml'){ $score+=30 }
+      if($low -match 'download\s+xml'){ $score+=25 }
+      if($low -match '\bxml\b'){ $score+=8 }
+      if($low -match 'baixar|download'){ $score+=8 }
+      if($low -match 'danfe|pdf'){ $score-=10 }
+      if($score -ge 16){ $candidates += [pscustomobject]@{ E=$e; Score=$score; Label=$text } }
+    } catch {}
+  }
+  foreach($c in ($candidates | Sort-Object Score -Descending)){
+    if(TryInvokeElement $c.E $c.Label){ return $true }
+  }
+  return $false
+}
 
 Log ('Iniciando automação reforçada para chave '+$Key.Substring(0,4)+'...'+$Key.Substring(40,4))
 $deadline=(Get-Date).AddSeconds(32)
@@ -112,4 +168,18 @@ Start-Sleep -Milliseconds 250
 if(-not (TryInvokeSearch $win)){
   try{ [System.Windows.Forms.SendKeys]::SendWait('{ENTER}'); Log 'Consulta acionada por ENTER.' }catch{}
 }
-exit 0
+
+# Após a consulta, aguarda a página de resultado liberar o botão/link de XML.
+# Se houver CAPTCHA, o usuário pode resolvê-lo manualmente; a automação continua aguardando.
+Log 'Aguardando controle Baixar XML após a consulta.'
+$downloadDeadline=(Get-Date).AddSeconds(120)
+$downloadClicked=$false
+while((Get-Date) -lt $downloadDeadline -and -not $downloadClicked){
+  $win=FindLookupWindow
+  if(-not $win){ Log 'Janela de consulta fechada antes do clique em Baixar XML.'; exit 3 }
+  $downloadClicked=TryInvokeDownloadXml $win
+  if(-not $downloadClicked){ Start-Sleep -Milliseconds 350 }
+}
+if($downloadClicked){ Log 'Baixar XML acionado automaticamente com sucesso.'; exit 0 }
+Log 'Botão/link Baixar XML não ficou disponível no prazo.'
+exit 4
