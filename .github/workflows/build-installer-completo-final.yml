@@ -138,6 +138,7 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
           $clean = "dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe"
           if (!(Test-Path $clean)) { throw "Instalador final limpo não gerado" }
+          Copy-Item -Force $clean "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
 
       - name: Teste de limpeza total e associação XML
         shell: pwsh
