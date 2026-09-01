@@ -61,9 +61,11 @@ jobs:
         shell: pwsh
         run: |
           python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_lookup_order.py
           node --check "installer-v2/payload/_internal/web/app.js"
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Bridge de abas não aplicado" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_LOCATOR_FIX_V1" -Quiet)) { throw "Correção do Localizador não aplicada" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_LOCATOR_HELPER_AFTER_WINDOW_V2" -Quiet)) { throw "Helper ainda inicia antes da janela" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "lookup-automation" -Quiet)) { throw "Frontend não chama o reforço de preenchimento" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Correção visual não aplicada" }
 
@@ -73,16 +75,25 @@ jobs:
           python installer-v2/patch_launcher_single_instance.py
           if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_SINGLE_INSTANCE_STRICT_V2" -Quiet)) { throw "Patch de instancia unica estrita nao aplicado" }
 
-      - name: Aplicar automação reforçada do Consulta DANFE
+      - name: Compilar helper Windows do Consulta DANFE
         shell: pwsh
         run: |
           python installer-v2/patch_launcher_lookup.py
-          if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_LOOKUP_AUTOMATION_V1" -Quiet)) { throw "Broker do Localizador não aplicado" }
+          if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_LOOKUP_AUTOMATION_V2" -Quiet)) { throw "Broker compilado do Localizador não aplicado" }
           New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
-          Copy-Item -Force "installer-v2/launcher/consulta_danfe_uia.ps1" "installer-v2/payload/_internal/csm/consulta_danfe_uia.ps1"
-          $tokens=$null; $errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "installer-v2/launcher/consulta_danfe_uia.ps1"), [ref]$tokens, [ref]$errors) | Out-Null
-          if($errors.Count -gt 0){ throw ($errors | Out-String) }
+          $fx = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
+          $csc = Join-Path $fx "csc.exe"
+          $uiaClient = Join-Path $fx "WPF\UIAutomationClient.dll"
+          $uiaTypes = Join-Path $fx "WPF\UIAutomationTypes.dll"
+          $forms = Join-Path $fx "System.Windows.Forms.dll"
+          foreach($required in @($csc,$uiaClient,$uiaTypes,$forms)) { if (!(Test-Path $required)) { throw "Dependência de compilação ausente: $required" } }
+          & $csc /nologo /target:winexe /optimize+ /platform:x64 `
+            /out:"installer-v2/payload/_internal/csm/CSM Consulta DANFE Helper.exe" `
+            /reference:"$uiaClient" /reference:"$uiaTypes" /reference:"$forms" `
+            "installer-v2/launcher/consulta_danfe_helper.cs"
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar helper Consulta DANFE: $LASTEXITCODE" }
+          if (!(Test-Path "installer-v2/payload/_internal/csm/CSM Consulta DANFE Helper.exe")) { throw "Helper compilado não gerado" }
+          if (Get-ChildItem "installer-v2/payload/_internal/csm" -Filter *.ps1 -ErrorAction SilentlyContinue) { throw "Build ainda contém script PowerShell no payload" }
 
       - name: Integrar launcher de instância única e recuperação
         shell: pwsh
@@ -98,7 +109,7 @@ jobs:
             "installer-v2/launcher/main.go"
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher não gerado" }
           if (!(Test-Path $core)) { throw "Core original não preservado" }
-          if (!(Test-Path "installer-v2/payload/_internal/csm/consulta_danfe_uia.ps1")) { throw "Helper do Consulta DANFE não empacotado" }
+          if (!(Test-Path "installer-v2/payload/_internal/csm/CSM Consulta DANFE Helper.exe")) { throw "Helper compilado do Consulta DANFE não empacotado" }
           $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
           if ($self.ExitCode -ne 0) { throw "Self-test do launcher falhou: $($self.ExitCode)" }
 
@@ -124,7 +135,6 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
           $clean = "dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe"
           if (!(Test-Path $clean)) { throw "Instalador final limpo não gerado" }
-          Copy-Item -Force $clean "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
 
       - name: Teste de limpeza total e associação XML
         shell: pwsh
@@ -137,12 +147,12 @@ jobs:
       - name: Validar artefatos do Localizador
         shell: pwsh
         run: |
-          $installedWeb = Join-Path $env:TEMP "csm-locator-static-test"
-          Remove-Item $installedWeb -Recurse -Force -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Force -Path $installedWeb | Out-Null
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "A consulta automática foi encerrada" -Quiet)) { throw "Timer terminal do Localizador ausente" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "lookup-automation" -Quiet)) { throw "Preenchimento reforçado do Localizador ausente" }
-          if (!(Test-Path "installer-v2/payload/_internal/csm/consulta_danfe_uia.ps1")) { throw "Helper UIA ausente" }
+          if (!(Test-Path "installer-v2/payload/_internal/csm/CSM Consulta DANFE Helper.exe")) { throw "Helper Windows UIA ausente" }
+          if (!(Select-String -Path "installer-v2/launcher/consulta_danfe_helper.cs" -Pattern "baixar xml" -Quiet)) { throw "Helper não contém busca por Baixar XML" }
+          if (!(Select-String -Path "installer-v2/launcher/consulta_danfe_helper.cs" -Pattern "aceitar todos" -Quiet)) { throw "Helper não contém tratamento de cookies" }
+          if (Get-ChildItem "installer-v2/payload/_internal/csm" -Filter *.ps1 -ErrorAction SilentlyContinue) { throw "Payload contém PowerShell e não é a build endurecida" }
 
       - name: Gerar checksum
         shell: pwsh
@@ -155,7 +165,7 @@ jobs:
       - name: Publicar artefato de homologação
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Localizador-Fix
+          name: CSMVisualizadorXML-Localizador-Defender-Friendly
           path: |
             dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe
             dist/CSMVisualizadorXML-Instalador-Completo-Limpo-SHA256.txt
