@@ -1,0 +1,51 @@
+name: Inspect Current Web Payload
+
+on:
+  push:
+    branches: ["fix/janela-invisivel-xml"]
+    paths:
+      - ".github/workflows/inspect-current-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Baixar instalador oficial 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 `
+            --repo 8453csm-dev/csm-visualizador-xml `
+            --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            --dir temp
+
+      - name: Extrair payload
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py `
+            "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            "installer-completo/enhancer_v8.html" `
+            "payload-inspect"
+          Get-ChildItem "payload-inspect/_internal/web" -File | Select-Object Name,Length | Format-Table -AutoSize
+
+      - name: Upload web source
+        uses: actions/upload-artifact@v4
+        with:
+          name: csm378-web-source
+          path: payload-inspect/_internal/web/**
+          if-no-files-found: error
+          retention-days: 3
