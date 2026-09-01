@@ -86,13 +86,16 @@ jobs:
           $uiaClient = Join-Path $fx "WPF\UIAutomationClient.dll"
           $uiaTypes = Join-Path $fx "WPF\UIAutomationTypes.dll"
           $forms = Join-Path $fx "System.Windows.Forms.dll"
-          foreach($required in @($csc,$uiaClient,$uiaTypes,$forms)) { if (!(Test-Path $required)) { throw "Dependência de compilação ausente: $required" } }
+          $source = (Resolve-Path "installer-v2/launcher/consulta_danfe_helper.cs").Path
+          $helperDir = (Resolve-Path "installer-v2/payload/_internal/csm").Path
+          $helperOut = Join-Path $helperDir "CSM Consulta DANFE Helper.exe"
+          foreach($required in @($csc,$uiaClient,$uiaTypes,$forms,$source)) { if (!(Test-Path $required)) { throw "Dependência de compilação ausente: $required" } }
           & $csc /nologo /target:winexe /optimize+ /platform:x64 `
-            /out:"installer-v2/payload/_internal/csm/CSM Consulta DANFE Helper.exe" `
-            /reference:"$uiaClient" /reference:"$uiaTypes" /reference:"$forms" `
-            "installer-v2/launcher/consulta_danfe_helper.cs"
+            "/out:$helperOut" `
+            "/reference:$uiaClient" "/reference:$uiaTypes" "/reference:$forms" `
+            $source
           if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar helper Consulta DANFE: $LASTEXITCODE" }
-          if (!(Test-Path "installer-v2/payload/_internal/csm/CSM Consulta DANFE Helper.exe")) { throw "Helper compilado não gerado" }
+          if (!(Test-Path $helperOut)) { throw "Helper compilado não gerado" }
           if (Get-ChildItem "installer-v2/payload/_internal/csm" -Filter *.ps1 -ErrorAction SilentlyContinue) { throw "Build ainda contém script PowerShell no payload" }
 
       - name: Integrar launcher de instância única e recuperação
