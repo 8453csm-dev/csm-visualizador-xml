@@ -108,7 +108,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
-          if (!(Test-Path "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe")) { throw "Instalador final não gerado" }
+          $clean = "dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe"
+          if (!(Test-Path $clean)) { throw "Instalador final limpo não gerado" }
+          Copy-Item -Force $clean "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
+
+      - name: Teste de limpeza total e associação XML
+        shell: pwsh
+        run: ./installer-v2/test_clean_association.ps1
 
       - name: Teste real de instalação, instância única, abas e desinstalação
         shell: pwsh
@@ -117,17 +123,17 @@ jobs:
       - name: Gerar checksum
         shell: pwsh
         run: |
-          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
+          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe"
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$sha  CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix-SHA256.txt"
+          "$sha  CSMVisualizadorXML-Instalador-Completo-Limpo.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-Instalador-Completo-Limpo-SHA256.txt"
           Write-Host "SHA256=$sha"
 
       - name: Publicar artefato de homologação
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Abas-Fix-v2
+          name: CSMVisualizadorXML-Instalacao-Limpa
           path: |
-            dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe
-            dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix-SHA256.txt
+            dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe
+            dist/CSMVisualizadorXML-Instalador-Completo-Limpo-SHA256.txt
           if-no-files-found: error
           retention-days: 30
