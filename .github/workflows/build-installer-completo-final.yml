@@ -34,6 +34,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.23.x"
+          cache: false
 
       - name: Baixar instalador oficial 3.7.8
         shell: pwsh
@@ -70,17 +71,14 @@ jobs:
           $original = "installer-v2/payload/CSM Visualizador XML.exe"
           $core = "installer-v2/payload/CSM Visualizador XML Core.exe"
           Move-Item -Force $original $core
-
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:CGO_ENABLED = "0"
           go build -trimpath -ldflags="-H windowsgui -s -w" `
             -o "installer-v2/payload/CSM Visualizador XML.exe" `
             "installer-v2/launcher/main.go"
-
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher não gerado" }
           if (!(Test-Path $core)) { throw "Core original não preservado" }
-
           $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
           if ($self.ExitCode -ne 0) { throw "Self-test do launcher falhou: $($self.ExitCode)" }
 
@@ -96,9 +94,7 @@ jobs:
         shell: pwsh
         run: |
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (!(Test-Path $iscc)) {
-            choco install innosetup -y --no-progress
-          }
+          if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
           if (!(Test-Path $iscc)) { throw "ISCC.exe não encontrado" }
 
       - name: Compilar instalador profissional
@@ -108,78 +104,9 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
           if (!(Test-Path "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe")) { throw "Instalador final não gerado" }
 
-      - name: Teste real de instalação, instância única e desinstalação
+      - name: Teste real de instalação, instância única, abas e desinstalação
         shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe").Path
-          $testDir = Join-Path $env:TEMP "CSMVisualizadorXML-AbasFix-Homologacao"
-          $legacy = Join-Path $env:LOCALAPPDATA "CSMVisualizadorXML"
-          $desktop = [Environment]::GetFolderPath('Desktop')
-          $shortcut = Join-Path $desktop "CSM Visualizador XML.lnk"
-          Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item $legacy -Recurse -Force -ErrorAction SilentlyContinue
-          Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CSM Visualizador XML.exe','CSM Visualizador XML Core.exe') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-          New-Item -ItemType Directory -Force -Path $legacy | Out-Null
-          "residuo-antigo" | Set-Content (Join-Path $legacy "residuo.txt")
-
-          $args = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="' + $testDir + '"'
-          $p = Start-Process -FilePath $installer -ArgumentList $args -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Instalação silenciosa falhou: $($p.ExitCode)" }
-
-          $main = Join-Path $testDir "CSM Visualizador XML.exe"
-          $core = Join-Path $testDir "CSM Visualizador XML Core.exe"
-          $uninstaller = Join-Path $testDir "unins000.exe"
-          $appjs = Join-Path $testDir "_internal\web\app.js"
-          $refcss = Join-Path $testDir "_internal\web\refinement.css"
-          if (!(Test-Path $main)) { throw "Launcher principal não instalado" }
-          if (!(Test-Path $core)) { throw "Core do Visualizador não instalado" }
-          if (!(Test-Path $uninstaller)) { throw "Desinstalador não instalado" }
-          if (Test-Path (Join-Path $legacy "residuo.txt")) { throw "Resíduo de versão antiga não foi removido" }
-          if (!(Test-Path $shortcut)) { throw "Atalho da Área de Trabalho não foi criado" }
-          if (!(Test-Path "Registry::HKEY_CURRENT_USER\Software\Classes\Applications\CSM Visualizador XML.exe\shell\open\command")) { throw "Registro Abrir com não foi criado" }
-          if (!(Select-String -Path $appjs -Pattern "companyTabLabel" -Quiet)) { throw "Etiqueta de empresa não instalada" }
-          if (!(Select-String -Path $appjs -Pattern "setupExternalOpenBridge" -Quiet)) { throw "Bridge externo não instalado" }
-          if (!(Select-String -Path $refcss -Pattern "body.light .meta-row .value" -Quiet)) { throw "Correção do tema claro não instalada" }
-
-          $launchTest = Start-Process -FilePath $main -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
-          if ($launchTest.ExitCode -ne 0) { throw "Launcher instalado falhou no self-test" }
-
-          $sample = Join-Path $env:TEMP "CSM Visualizador XML teste.xml"
-          $sampleXml = '<?xml version="1.0" encoding="UTF-8"?><NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe35260811129502000486550010000342541000000000" versao="4.00"><ide><cUF>35</cUF><mod>55</mod><serie>16</serie><nNF>34254</nNF><dhEmi>2026-08-16T00:00:00-03:00</dhEmi><tpNF>1</tpNF></ide><emit><CNPJ>11129502000486</CNPJ><xNome>PIRUETA COMERCIAL LTDA</xNome></emit><dest><CPF>00000000191</CPF><xNome>CONSUMIDOR NAO IDENTIFICADO</xNome></dest><total><ICMSTot><vProd>23.89</vProd><vNF>23.89</vNF></ICMSTot></total></infNFe></NFe>'
-          Set-Content -Path $sample -Value $sampleXml -Encoding utf8
-
-          $primary = Start-Process -FilePath $main -PassThru
-          $health = $null
-          for($i=0;$i -lt 50;$i++){
-            try { $health = Invoke-RestMethod -Uri 'http://127.0.0.1:47878/health' -TimeoutSec 1; if($health.ok){ break } } catch {}
-            Start-Sleep -Milliseconds 200
-          }
-          if(!$health -or !$health.ok){ throw "Broker de instância única não iniciou" }
-
-          $second = Start-Process -FilePath $main -ArgumentList ('"' + $sample + '"') -Wait -PassThru
-          if($second.ExitCode -ne 0){ throw "Segunda abertura pelo Windows falhou" }
-          Start-Sleep -Milliseconds 800
-          $cores = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'CSM Visualizador XML Core.exe' })
-          if($cores.Count -ne 1){ throw "Instância única falhou: $($cores.Count) Cores encontrados" }
-
-          $health2 = Invoke-RestMethod -Uri 'http://127.0.0.1:47878/health' -TimeoutSec 2
-          if(!$health2.ok){ throw "Broker deixou de responder após segunda nota" }
-          Write-Host "Broker OK. Core único=$($health2.core_pid) Subscribers=$($health2.subscribers) Pending=$($health2.pending)"
-
-          $htmls = Get-ChildItem $testDir -Recurse -File -Include *.html,*.htm
-          $marker = $false
-          foreach ($h in $htmls) {
-            if (Select-String -Path $h.FullName -Pattern "CSM_XML_ENHANCER_V8" -Quiet -ErrorAction SilentlyContinue) { $marker = $true; break }
-          }
-          if (!$marker) { throw "Aba XML v8 não encontrada nos arquivos instalados" }
-
-          $up = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
-          if ($up.ExitCode -ne 0) { throw "Desinstalação silenciosa falhou: $($up.ExitCode)" }
-          Start-Sleep -Milliseconds 900
-          if (Test-Path $main) { throw "Launcher permaneceu após desinstalação" }
-          if (Test-Path $core) { throw "Core permaneceu após desinstalação" }
-          if (Test-Path $shortcut) { throw "Atalho da Área de Trabalho permaneceu após desinstalação" }
+        run: ./installer-v2/test_installed.ps1
 
       - name: Gerar checksum
         shell: pwsh
