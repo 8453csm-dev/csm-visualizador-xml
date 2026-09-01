@@ -56,7 +56,15 @@ jobs:
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Executável principal ausente após extração" }
           if (!(Test-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico")) { throw "Ícone oficial ausente após extração" }
 
-      - name: Integrar launcher de recuperação de janela
+      - name: Aplicar abas externas, etiquetas e tema claro
+        shell: pwsh
+        run: |
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          node --check "installer-v2/payload/_internal/web/app.js"
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Bridge de abas não aplicado" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Correção visual não aplicada" }
+
+      - name: Integrar launcher de instância única e recuperação
         shell: pwsh
         run: |
           $original = "installer-v2/payload/CSM Visualizador XML.exe"
@@ -98,19 +106,20 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
-          if (!(Test-Path "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe")) { throw "Instalador final não gerado" }
+          if (!(Test-Path "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe")) { throw "Instalador final não gerado" }
 
-      - name: Teste real de instalação limpa, launcher e desinstalação
+      - name: Teste real de instalação, instância única e desinstalação
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe").Path
-          $testDir = Join-Path $env:TEMP "CSMVisualizadorXML-JanelaFix-Homologacao"
+          $installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe").Path
+          $testDir = Join-Path $env:TEMP "CSMVisualizadorXML-AbasFix-Homologacao"
           $legacy = Join-Path $env:LOCALAPPDATA "CSMVisualizadorXML"
           $desktop = [Environment]::GetFolderPath('Desktop')
           $shortcut = Join-Path $desktop "CSM Visualizador XML.lnk"
           Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item $legacy -Recurse -Force -ErrorAction SilentlyContinue
+          Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('CSM Visualizador XML.exe','CSM Visualizador XML Core.exe') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           New-Item -ItemType Directory -Force -Path $legacy | Out-Null
           "residuo-antigo" | Set-Content (Join-Path $legacy "residuo.txt")
 
@@ -121,15 +130,44 @@ jobs:
           $main = Join-Path $testDir "CSM Visualizador XML.exe"
           $core = Join-Path $testDir "CSM Visualizador XML Core.exe"
           $uninstaller = Join-Path $testDir "unins000.exe"
+          $appjs = Join-Path $testDir "_internal\web\app.js"
+          $refcss = Join-Path $testDir "_internal\web\refinement.css"
           if (!(Test-Path $main)) { throw "Launcher principal não instalado" }
           if (!(Test-Path $core)) { throw "Core do Visualizador não instalado" }
           if (!(Test-Path $uninstaller)) { throw "Desinstalador não instalado" }
           if (Test-Path (Join-Path $legacy "residuo.txt")) { throw "Resíduo de versão antiga não foi removido" }
           if (!(Test-Path $shortcut)) { throw "Atalho da Área de Trabalho não foi criado" }
           if (!(Test-Path "Registry::HKEY_CURRENT_USER\Software\Classes\Applications\CSM Visualizador XML.exe\shell\open\command")) { throw "Registro Abrir com não foi criado" }
+          if (!(Select-String -Path $appjs -Pattern "companyTabLabel" -Quiet)) { throw "Etiqueta de empresa não instalada" }
+          if (!(Select-String -Path $appjs -Pattern "setupExternalOpenBridge" -Quiet)) { throw "Bridge externo não instalado" }
+          if (!(Select-String -Path $refcss -Pattern "body.light .meta-row .value" -Quiet)) { throw "Correção do tema claro não instalada" }
 
           $launchTest = Start-Process -FilePath $main -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
           if ($launchTest.ExitCode -ne 0) { throw "Launcher instalado falhou no self-test" }
+
+          $sample = Join-Path $env:TEMP "CSM Visualizador XML teste.xml"
+          @'
+<?xml version="1.0" encoding="UTF-8"?>
+<NFe xmlns="http://www.portalfiscal.inf.br/nfe"><infNFe Id="NFe35260811129502000486550010000342541000000000" versao="4.00"><ide><cUF>35</cUF><mod>55</mod><serie>16</serie><nNF>34254</nNF><dhEmi>2026-08-16T00:00:00-03:00</dhEmi><tpNF>1</tpNF></ide><emit><CNPJ>11129502000486</CNPJ><xNome>PIRUETA COMERCIAL LTDA</xNome></emit><dest><CPF>00000000191</CPF><xNome>CONSUMIDOR NAO IDENTIFICADO</xNome></dest><total><ICMSTot><vProd>23.89</vProd><vNF>23.89</vNF></ICMSTot></total></infNFe></NFe>
+'@ | Set-Content -Encoding utf8 $sample
+
+          $primary = Start-Process -FilePath $main -PassThru
+          $health = $null
+          for($i=0;$i -lt 50;$i++){
+            try { $health = Invoke-RestMethod -Uri 'http://127.0.0.1:47878/health' -TimeoutSec 1; if($health.ok){ break } } catch {}
+            Start-Sleep -Milliseconds 200
+          }
+          if(!$health -or !$health.ok){ throw "Broker de instância única não iniciou" }
+
+          $second = Start-Process -FilePath $main -ArgumentList ('"' + $sample + '"') -Wait -PassThru
+          if($second.ExitCode -ne 0){ throw "Segunda abertura pelo Windows falhou" }
+          Start-Sleep -Milliseconds 800
+          $cores = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'CSM Visualizador XML Core.exe' })
+          if($cores.Count -ne 1){ throw "Instância única falhou: $($cores.Count) Cores encontrados" }
+
+          $health2 = Invoke-RestMethod -Uri 'http://127.0.0.1:47878/health' -TimeoutSec 2
+          if(!$health2.ok){ throw "Broker deixou de responder após segunda nota" }
+          Write-Host "Broker OK. Core único=$($health2.core_pid) Subscribers=$($health2.subscribers) Pending=$($health2.pending)"
 
           $htmls = Get-ChildItem $testDir -Recurse -File -Include *.html,*.htm
           $marker = $false
@@ -140,7 +178,7 @@ jobs:
 
           $up = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
           if ($up.ExitCode -ne 0) { throw "Desinstalação silenciosa falhou: $($up.ExitCode)" }
-          Start-Sleep -Milliseconds 700
+          Start-Sleep -Milliseconds 900
           if (Test-Path $main) { throw "Launcher permaneceu após desinstalação" }
           if (Test-Path $core) { throw "Core permaneceu após desinstalação" }
           if (Test-Path $shortcut) { throw "Atalho da Área de Trabalho permaneceu após desinstalação" }
@@ -148,17 +186,17 @@ jobs:
       - name: Gerar checksum
         shell: pwsh
         run: |
-          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe"
+          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$sha  CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix-SHA256.txt"
+          "$sha  CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe" | Set-Content -Encoding ascii "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix-SHA256.txt"
           Write-Host "SHA256=$sha"
 
       - name: Publicar artefato de homologação
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Janela-Fix
+          name: CSMVisualizadorXML-Abas-Fix
           path: |
-            dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix.exe
-            dist/CSMVisualizadorXML-Instalador-Completo-Janela-Fix-SHA256.txt
+            dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe
+            dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix-SHA256.txt
           if-no-files-found: error
           retention-days: 30
