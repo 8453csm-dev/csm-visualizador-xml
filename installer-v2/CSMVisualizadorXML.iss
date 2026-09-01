@@ -1,5 +1,5 @@
 #define AppName "CSM Visualizador XML"
-#define AppVersion "3.7.8.9"
+#define AppVersion "3.7.8.10"
 #define Publisher "CSM - Contabilidade São Mateus"
 #define AppExe "CSM Visualizador XML.exe"
 #define CoreExe "CSM Visualizador XML Core.exe"
@@ -29,7 +29,7 @@ SetupIconFile=payload\_internal\assets\CSMVisualizadorXML.ico
 UninstallDisplayName=CSM Visualizador XML
 UninstallDisplayIcon={app}\_internal\assets\CSMVisualizadorXML.ico
 OutputDir=..\dist
-OutputBaseFilename=CSMVisualizadorXML-Instalador-Completo-Janela-Fix
+OutputBaseFilename=CSMVisualizadorXML-Instalador-Completo-Abas-Fix
 Compression=lzma2/max
 SolidCompression=yes
 CloseApplications=yes
@@ -37,10 +37,10 @@ RestartApplications=no
 AllowNoIcons=no
 MinVersion=10.0
 VersionInfoCompany={#Publisher}
-VersionInfoDescription=Instalador completo do CSM Visualizador XML com recuperação automática de janela
+VersionInfoDescription=Instalador completo do CSM Visualizador XML com instância única, abas externas e recuperação de janela
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-VersionInfoVersion=3.7.8.9
+VersionInfoVersion=3.7.8.10
 
 [Files]
 Source: "payload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -148,8 +148,11 @@ begin
 
   WizardForm.WelcomeLabel2.Caption :=
     'Instalação limpa e segura do CSM Visualizador XML.' + #13#10 + #13#10 +
-    '• Corrige abertura invisível e janela presa na barra de tarefas' + #13#10 +
-    '• Corrige abertura de XML pelo Windows / Abrir com' + #13#10 +
+    '• Mantém somente uma instância do Visualizador aberta' + #13#10 +
+    '• Novos XMLs abrem em abas no mesmo aplicativo' + #13#10 +
+    '• Mostra a empresa e MATRIZ/FILIAL na aba da nota' + #13#10 +
+    '• Corrige contraste das informações no tema claro' + #13#10 +
+    '• Reforça a recuperação de janela invisível ou presa' + #13#10 +
     '• Mantém a Aba XML otimizada com sintaxe e cores' + #13#10 +
     '• Remove automaticamente versões anteriores' + #13#10 +
     '• Cria atalho e desinstalador integrado ao Windows' + #13#10 + #13#10 +
@@ -168,7 +171,7 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpReady then begin
     WizardForm.PageNameLabel.Caption := 'Tudo pronto para instalar';
-    WizardForm.PageDescriptionLabel.Caption := 'A versão anterior será removida e a correção de inicialização será instalada.';
+    WizardForm.PageDescriptionLabel.Caption := 'A versão anterior será removida e a nova correção será instalada.';
     WizardForm.NextButton.Caption := 'Instalar';
   end else if CurPageID = wpInstalling then begin
     WizardForm.PageNameLabel.Caption := 'Instalando CSM Visualizador XML';
