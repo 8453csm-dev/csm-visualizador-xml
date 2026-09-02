@@ -2,7 +2,7 @@ name: Build Instalador Completo Profissional
 
 on:
   push:
-    branches: ["release/instalador-completo-final", "fix/janela-invisivel-xml"]
+    branches: ["release/instalador-completo-final", "fix/janela-invisivel-xml", "feature/motor-devolucao-fiscal"]
     paths:
       - "installer-v2/**"
       - "installer-completo/enhancer_v8.html"
@@ -57,17 +57,21 @@ jobs:
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Executável principal ausente após extração" }
           if (!(Test-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico")) { throw "Ícone oficial ausente após extração" }
 
-      - name: Aplicar abas, etiquetas, tema e Localizador
+      - name: Aplicar abas, etiquetas, tema, Localizador e Motor Fiscal
         shell: pwsh
         run: |
           python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
           python installer-v2/patch_lookup_order.py
+          python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          node installer-v2/test_devolution_engine.js
           node --check "installer-v2/payload/_internal/web/app.js"
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Bridge de abas não aplicado" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_LOCATOR_FIX_V1" -Quiet)) { throw "Correção do Localizador não aplicada" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_LOCATOR_HELPER_AFTER_WINDOW_V2" -Quiet)) { throw "Helper ainda inicia antes da janela" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "lookup-automation" -Quiet)) { throw "Frontend não chama o reforço de preenchimento" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_DEVOLUTION_ENGINE_V1" -Quiet)) { throw "Motor Fiscal de Devolução não aplicado" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_MULTI_TAB_BRIDGE_V1" -Quiet)) { throw "Correção visual não aplicada" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_DEVOLUTION_ENGINE_V1" -Quiet)) { throw "Estilos do Motor Fiscal não aplicados" }
 
       - name: Aplicar instancia unica estrita
         shell: pwsh
@@ -148,6 +152,15 @@ jobs:
         shell: pwsh
         run: ./installer-v2/test_installed.ps1
 
+      - name: Validar Motor Fiscal no payload final
+        shell: pwsh
+        run: |
+          node installer-v2/test_devolution_engine.js
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "Criar modelo de devolução" -Quiet)) { throw "Botão de devolução não empacotado" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "DFeReferenciado" -Quiet)) { throw "Referenciamento por item ausente" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSOSN 900" -Quiet)) { throw "Regra Simples Nacional não empacotada" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "Salvar orientação HTML" -Quiet)) { throw "Exportação orientativa ausente" }
+
       - name: Validar artefatos do Localizador
         shell: pwsh
         run: |
@@ -169,7 +182,7 @@ jobs:
       - name: Publicar artefato de homologação
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Localizador-Defender-Friendly
+          name: CSMVisualizadorXML-Motor-Devolucao-Fiscal-Beta
           path: |
             dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe
             dist/CSMVisualizadorXML-Instalador-Completo-Limpo-SHA256.txt
