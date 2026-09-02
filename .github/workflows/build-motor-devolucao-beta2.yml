@@ -59,8 +59,10 @@ jobs:
           if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_DEVOLUTION_ENGINE_V2" -Quiet)) { throw "CSS Beta 2 nao aplicado" }
           if (!(Select-String -Path $app -Pattern "DADOS DOS PRODUTOS / SERVIÇOS" -Quiet)) { throw "Modelo DANFE-like nao aplicado" }
           if (!(Select-String -Path $app -Pattern "document.title=newTitle" -Quiet)) { throw "Nome Devolucao da NF nao aplicado ao PDF" }
+          $appText = Get-Content -Raw $app
           foreach($name in @("csmDevLoadDraft","csmDevGeneralFields","csmDevLineCard","csmDevRender","csmDevBind","csmDevGuideHtml","csmDevDownloadGuide","csmDevPrintGuide","csmDevOpen")) {
-            $count = (Select-String -Path $app -Pattern "function $name(" -SimpleMatch -AllMatches).Matches.Count
+            $needle = [regex]::Escape("function $name(")
+            $count = [regex]::Matches($appText, $needle).Count
             if ($count -ne 1) { throw "Funcao $name deve possuir apenas a declaracao original V1; encontrado: $count" }
           }
 
