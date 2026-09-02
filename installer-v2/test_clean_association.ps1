@@ -40,18 +40,25 @@ if (!(Test-Path $uninstaller)) { throw "Desinstalador atual não foi instalado" 
 if (!(Test-Path $buildInfo)) { throw "Identidade 3.8.0 não foi instalada" }
 if (!(Test-Path $appJs)) { throw "Frontend instalado não foi encontrado" }
 if (!(Test-Path $iconFile)) { throw "Ícone profissional do CSM não foi instalado" }
-$bi = Get-Content $buildInfo -Raw | ConvertFrom-Json
+$bi = Get-Content $buildInfo -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($bi.version -ne '3.8.0') { throw "Limpeza terminou com versão incorreta: $($bi.version)" }
 
+# Lê como UTF-8 explicitamente. Select-String no runner já gerou falso negativo
+# com o literal acentuado do modal Sobre, apesar do patch ter sido aplicado.
+$appText = Get-Content $appJs -Raw -Encoding UTF8
 $aboutToken = "els.aboutVersion.textContent='Versão 3.8.0'"
-$aboutMatches = @(Select-String -Path $appJs -Pattern $aboutToken -SimpleMatch -AllMatches)
-$aboutCount = ($aboutMatches | ForEach-Object { $_.Matches.Count } | Measure-Object -Sum).Sum
-if (-not $aboutCount) { $aboutCount = 0 }
+$aboutCount = ([regex]::Matches($appText, [regex]::Escape($aboutToken))).Count
+Write-Host "Ocorrências da versão visual 3.8.0 no app instalado: $aboutCount"
 if ($aboutCount -lt 2) {
+    Write-Host "Linhas aboutVersion encontradas no app instalado:"
+    (($appText -split "`n") | Where-Object { $_ -match 'aboutVersion' }) | ForEach-Object { Write-Host $_ }
     throw "A versão visual do modal Sobre ainda não está fixada em 3.8.0 (ocorrências: $aboutCount)"
 }
-if (Select-String -Path $appJs -Pattern 'aboutVersion.textContent=`Versão ${r?.version' -SimpleMatch -Quiet) {
+if ($appText.Contains('aboutVersion.textContent=`Versão ${r?.version')) {
     throw "Modal Sobre ainda depende do get_app_info() antigo"
+}
+if ($appText.Contains('aboutVersion.textContent=`Versão ${r.current')) {
+    throw "Verificação de atualização ainda pode restaurar versão antiga no Sobre"
 }
 
 if (Test-Path $legacy1) { throw "Pasta residual antiga permaneceu: $legacy1" }
