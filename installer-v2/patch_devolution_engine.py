@@ -20,6 +20,18 @@ def append_marker(path: Path, payload: str, marker: str, label: str) -> None:
     print(f'{label} atualizado com {marker}')
 
 
+def sanitize_v2(payload: str) -> str:
+    # A primeira Beta 2 continha um regex quebrado por uma quebra física de linha
+    # dentro de /.../, o que fazia o app.js inteiro deixar de carregar no WebView.
+    # Corrigimos antes de injetar no aplicativo e falhamos se o padrão inválido restar.
+    broken = "replace(/\\\n/g,'<br>')"
+    fixed = "replace(/\\n/g,'<br>')"
+    payload = payload.replace(broken, fixed)
+    if "replace(/\\\n/g,'<br>')" in payload:
+        raise SystemExit('Regex inválido da Beta 2 ainda presente após saneamento')
+    return payload
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print('uso: patch_devolution_engine.py <pasta-web>', file=sys.stderr)
@@ -33,10 +45,15 @@ def main() -> int:
     missing = [str(p) for p in required if not p.is_file()]
     if missing:
         raise SystemExit('Arquivos-fonte do Motor de Devolução ausentes: ' + ', '.join(missing))
+
     append_marker(app, SNIPPET_V1.read_text(encoding='utf-8'), MARKER_V1, 'app.js')
     append_marker(css, STYLE_V1.read_text(encoding='utf-8'), MARKER_V1, 'refinement.css')
-    append_marker(app, SNIPPET_V2.read_text(encoding='utf-8'), MARKER_V2, 'app.js')
+    append_marker(app, sanitize_v2(SNIPPET_V2.read_text(encoding='utf-8')), MARKER_V2, 'app.js')
     append_marker(css, STYLE_V2.read_text(encoding='utf-8'), MARKER_V2, 'refinement.css')
+
+    final = app.read_text(encoding='utf-8')
+    if MARKER_V1 not in final or MARKER_V2 not in final:
+        raise SystemExit('Motor Fiscal incompleto no app.js final')
     return 0
 
 
