@@ -47,16 +47,25 @@ jobs:
             "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
             "installer-completo/enhancer_v8.html" `
             "installer-v2/payload"
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao extrair base estável" }
+
           python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao aplicar runtime validado" }
           python installer-v2/patch_lookup_order.py
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao aplicar Localizador" }
           python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao aplicar Motor Fiscal" }
           python installer-v2/patch_release_identity.py `
             "installer-v2/payload/_internal/web" `
             "installer-v2/payload/_internal/csm"
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao aplicar identidade 3.8.0" }
 
           node installer-v2/test_devolution_engine.js
+          if ($LASTEXITCODE -ne 0) { throw "Teste fiscal base falhou" }
           node installer-v2/test_devolution_engine_v3.js
+          if ($LASTEXITCODE -ne 0) { throw "Teste Motor Fiscal 1.2 falhou" }
           node --check installer-v2/devolution_engine_v3_patch.js
+          if ($LASTEXITCODE -ne 0) { throw "JavaScript V3 inválido" }
 
           $app = "installer-v2/payload/_internal/web/app.js"
           Copy-Item -Force $app "temp/csm-app-3.8.0.mjs"
@@ -85,12 +94,14 @@ jobs:
         shell: pwsh
         run: |
           python installer-v2/patch_launcher_single_instance.py
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao aplicar instância única" }
           if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_SINGLE_INSTANCE_STRICT_V2" -Quiet)) { throw "Instancia unica nao aplicada" }
 
       - name: Compilar helper Windows Consulta DANFE
         shell: pwsh
         run: |
           python installer-v2/patch_launcher_lookup.py
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao preparar helper Consulta DANFE" }
           New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
           $fx = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
           $csc = Join-Path $fx "csc.exe"
@@ -118,6 +129,7 @@ jobs:
           go build -trimpath -ldflags="-H windowsgui -s -w" `
             -o "installer-v2/payload/CSM Visualizador XML.exe" `
             "installer-v2/launcher/main.go"
+          if ($LASTEXITCODE -ne 0) { throw "Compilação do launcher falhou" }
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher nao gerado" }
           if (!(Test-Path $core)) { throw "Core original nao preservado" }
           $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
@@ -127,7 +139,9 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check pillow
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar Pillow" }
           python installer-v2/make_brand.py
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar identidade visual" }
 
       - name: Instalar Inno Setup 6
         shell: pwsh
@@ -136,10 +150,14 @@ jobs:
           if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
           if (!(Test-Path $iscc)) { throw "ISCC.exe nao encontrado" }
 
-      - name: Validar instalador em portugues e versao
+      - name: Preparar e validar instalador em portugues
         shell: pwsh
         run: |
-          $iss = Get-Content "installer-v2/CSMVisualizadorXML.iss" -Raw
+          $path = "installer-v2/CSMVisualizadorXML.iss"
+          $text = Get-Content $path -Raw
+          $text = [regex]::Replace($text, '(?m)^UninstallDisplayVersion=.*\r?\n', '')
+          [IO.File]::WriteAllText((Resolve-Path $path), $text, [Text.UTF8Encoding]::new($false))
+          $iss = Get-Content $path -Raw
           foreach($token in @('AppVersion "3.8.0"','BrazilianPortuguese.isl','NOVIDADES DESTA VERSÃO','Motor Fiscal de Devolução','ICMS-ST')) {
             if(!$iss.Contains($token)) { throw "Instalador 3.8.0 incompleto: $token" }
           }
@@ -149,6 +167,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Compilação Inno Setup falhou" }
           $base = "dist/CSMVisualizadorXML-3.8.0-Instalador-Completo.exe"
           if (!(Test-Path $base)) { throw "Instalador 3.8.0 nao gerado" }
           Copy-Item -Force $base "dist/CSM Visualizador XML 3.8.0 - Instalador Completo.exe"
@@ -188,6 +207,7 @@ jobs:
         shell: pwsh
         run: |
           node installer-v2/test_devolution_engine_v3.js
+          if ($LASTEXITCODE -ne 0) { throw "Motor Fiscal 1.2 falhou na validação final" }
           $app = "installer-v2/payload/_internal/web/app.js"
           Copy-Item -Force $app "temp/csm-app-final-3.8.0.mjs"
           node --check "temp/csm-app-final-3.8.0.mjs"
