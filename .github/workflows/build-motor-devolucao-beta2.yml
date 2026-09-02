@@ -50,12 +50,19 @@ jobs:
           python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
           python installer-v2/patch_lookup_order.py
           python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
-          node --check installer-v2/devolution_engine_v2_patch.js
           node installer-v2/test_devolution_engine.js
-          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_DEVOLUTION_ENGINE_V2" -Quiet)) { throw "Motor Fiscal Beta 2 nao aplicado" }
+          $app = "installer-v2/payload/_internal/web/app.js"
+          Copy-Item -Force $app "temp/csm-app-final.mjs"
+          node --check "temp/csm-app-final.mjs"
+          if ($LASTEXITCODE -ne 0) { throw "app.js final invalido como ES module; build bloqueada" }
+          if (!(Select-String -Path $app -Pattern "CSM_DEVOLUTION_ENGINE_V2" -Quiet)) { throw "Motor Fiscal Beta 2 nao aplicado" }
           if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_DEVOLUTION_ENGINE_V2" -Quiet)) { throw "CSS Beta 2 nao aplicado" }
-          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "DADOS DOS PRODUTOS / SERVIÇOS" -Quiet)) { throw "Modelo DANFE-like nao aplicado" }
-          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "document.title=newTitle" -Quiet)) { throw "Nome Devolucao da NF nao aplicado ao PDF" }
+          if (!(Select-String -Path $app -Pattern "DADOS DOS PRODUTOS / SERVIÇOS" -Quiet)) { throw "Modelo DANFE-like nao aplicado" }
+          if (!(Select-String -Path $app -Pattern "document.title=newTitle" -Quiet)) { throw "Nome Devolucao da NF nao aplicado ao PDF" }
+          foreach($name in @("csmDevLoadDraft","csmDevGeneralFields","csmDevLineCard","csmDevRender","csmDevBind","csmDevGuideHtml","csmDevDownloadGuide","csmDevPrintGuide","csmDevOpen")) {
+            $count = (Select-String -Path $app -Pattern "function $name(" -SimpleMatch -AllMatches).Matches.Count
+            if ($count -ne 1) { throw "Funcao $name deve possuir apenas a declaracao original V1; encontrado: $count" }
+          }
 
       - name: Aplicar instancia unica estrita
         shell: pwsh
@@ -119,7 +126,7 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
           $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe"
           if (!(Test-Path $exe)) { throw "Instalador nao gerado" }
-          Copy-Item -Force $exe "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe"
+          Copy-Item -Force $exe "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 Corrigida.exe"
           Copy-Item -Force $exe "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
 
       - name: Teste de limpeza e associacao XML
@@ -135,24 +142,27 @@ jobs:
         run: |
           node installer-v2/test_devolution_engine.js
           $app = "installer-v2/payload/_internal/web/app.js"
-          foreach($token in @("CSM_DEVOLUTION_ENGINE_V2","Devolução da NF","Selecionar encontrados","CÁLCULO DO IMPOSTO","TRANSPORTADOR / VOLUMES TRANSPORTADOS","DADOS DOS PRODUTOS / SERVIÇOS","não aparece no PDF do cliente")) {
-            if (!(Select-String -Path $app -Pattern $token -SimpleMatch -Quiet)) { throw "Token Beta 2 ausente: $token" }
+          Copy-Item -Force $app "temp/csm-app-final-after-tests.mjs"
+          node --check "temp/csm-app-final-after-tests.mjs"
+          if ($LASTEXITCODE -ne 0) { throw "app.js final deixou de ser modulo ES valido" }
+          foreach($token in @("CSM_DEVOLUTION_ENGINE_V2","Devolução da NF","Selecionar encontrados","CÁLCULO DO IMPOSTO","TRANSPORTADOR / VOLUMES TRANSPORTADOS","DADOS DOS PRODUTOS / SERVIÇOS","não aparece no PDF do cliente","CSM_MULTI_TAB_BRIDGE_V1","CSM_LOCATOR_FIX_V1")) {
+            if (!(Select-String -Path $app -Pattern $token -SimpleMatch -Quiet)) { throw "Token obrigatorio ausente: $token" }
           }
 
       - name: Gerar checksum
         shell: pwsh
         run: |
-          $exe = "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe"
+          $exe = "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 Corrigida.exe"
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
-          "$sha  CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe" | Set-Content -Encoding ascii "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 - SHA256.txt"
+          "$sha  CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 Corrigida.exe" | Set-Content -Encoding ascii "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 Corrigida - SHA256.txt"
           Write-Host "SHA256=$sha"
 
-      - name: Publicar artefato Beta 2
+      - name: Publicar artefato Beta 2 corrigida
         uses: actions/upload-artifact@v4
         with:
-          name: CSMVisualizadorXML-Motor-Devolucao-Fiscal-Beta-2
+          name: CSMVisualizadorXML-Motor-Devolucao-Fiscal-Beta-2-Corrigida
           path: |
-            dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe
-            dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 - SHA256.txt
+            dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 Corrigida.exe
+            dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 Corrigida - SHA256.txt
           if-no-files-found: error
           retention-days: 30
