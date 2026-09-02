@@ -45,8 +45,10 @@ if ($bi.version -ne '3.8.0') { throw "Limpeza terminou com versão incorreta: $(
 
 $aboutToken = "els.aboutVersion.textContent='Versão 3.8.0'"
 $aboutMatches = @(Select-String -Path $appJs -Pattern $aboutToken -SimpleMatch -AllMatches)
-if ($aboutMatches.Count -eq 0 -or $aboutMatches[0].Matches.Count -lt 2) {
-    throw "A versão visual do modal Sobre ainda não está fixada em 3.8.0"
+$aboutCount = ($aboutMatches | ForEach-Object { $_.Matches.Count } | Measure-Object -Sum).Sum
+if (-not $aboutCount) { $aboutCount = 0 }
+if ($aboutCount -lt 2) {
+    throw "A versão visual do modal Sobre ainda não está fixada em 3.8.0 (ocorrências: $aboutCount)"
 }
 if (Select-String -Path $appJs -Pattern 'aboutVersion.textContent=`Versão ${r?.version' -SimpleMatch -Quiet) {
     throw "Modal Sobre ainda depende do get_app_info() antigo"
