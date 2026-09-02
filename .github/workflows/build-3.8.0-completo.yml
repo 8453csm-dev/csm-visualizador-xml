@@ -117,21 +117,48 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $helperOut)) { throw "Falha ao compilar helper Consulta DANFE" }
           if (Get-ChildItem "installer-v2/payload/_internal/csm" -Filter *.ps1 -ErrorAction SilentlyContinue) { throw "Payload contem PowerShell indevido" }
 
-      - name: Compilar launcher
+      - name: Compilar launcher com logo embutida
         shell: pwsh
         run: |
           $original = "installer-v2/payload/CSM Visualizador XML.exe"
           $core = "installer-v2/payload/CSM Visualizador XML Core.exe"
+          $icon = (Resolve-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico").Path
           Move-Item -Force $original $core
+
+          # O Windows usa o ícone embutido no executável em vários pontos do shell,
+          # inclusive no seletor Abrir com / Aplicativos padrão. O registro também
+          # aponta para o .ico, mas o launcher passa a ter identidade própria no PE.
+          go install github.com/akavel/rsrc@v0.10.2
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar gerador de recurso do launcher" }
+          $rsrc = Join-Path (go env GOPATH) "bin\rsrc.exe"
+          if (!(Test-Path $rsrc)) { throw "rsrc.exe não encontrado" }
+          & $rsrc -arch amd64 -ico $icon -o "installer-v2/launcher/rsrc_windows_amd64.syso"
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path "installer-v2/launcher/rsrc_windows_amd64.syso")) { throw "Falha ao embutir logo CSM no launcher" }
+
           $env:GOOS = "windows"
           $env:GOARCH = "amd64"
           $env:CGO_ENABLED = "0"
-          go build -trimpath -ldflags="-H windowsgui -s -w" `
-            -o "installer-v2/payload/CSM Visualizador XML.exe" `
-            "installer-v2/launcher/main.go"
-          if ($LASTEXITCODE -ne 0) { throw "Compilação do launcher falhou" }
+          $env:GO111MODULE = "off"
+          Push-Location "installer-v2/launcher"
+          try {
+            go build -trimpath -ldflags="-H windowsgui -s -w" `
+              -o "..\payload\CSM Visualizador XML.exe" `
+              .
+            if ($LASTEXITCODE -ne 0) { throw "Compilação do launcher falhou" }
+          }
+          finally {
+            Pop-Location
+          }
           if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher nao gerado" }
           if (!(Test-Path $core)) { throw "Core original nao preservado" }
+
+          # Verificação de recurso: um executável sem ícone próprio não deve passar.
+          Add-Type -AssemblyName System.Drawing
+          $embeddedIcon = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path "installer-v2/payload/CSM Visualizador XML.exe").Path)
+          if ($null -eq $embeddedIcon -or $embeddedIcon.Width -lt 16 -or $embeddedIcon.Height -lt 16) { throw "Launcher foi gerado sem ícone embutido válido" }
+          Write-Host "Ícone embutido no launcher: $($embeddedIcon.Width)x$($embeddedIcon.Height)"
+          $embeddedIcon.Dispose()
+
           $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
           if ($self.ExitCode -ne 0) { throw "Self-test do launcher falhou" }
 
@@ -158,7 +185,7 @@ jobs:
           $text = [regex]::Replace($text, '(?m)^UninstallDisplayVersion=.*\r?\n', '')
           [IO.File]::WriteAllText((Resolve-Path $path), $text, [Text.UTF8Encoding]::new($false))
           $iss = Get-Content $path -Raw
-          foreach($token in @('AppVersion "3.8.0"','BrazilianPortuguese.isl','NOVIDADES DESTA VERSÃO','Motor Fiscal de Devolução','ICMS-ST')) {
+          foreach($token in @('AppVersion "3.8.0"','BrazilianPortuguese.isl','NOVIDADES DESTA VERSÃO','Motor Fiscal de Devolução','ICMS-ST','ApplicationIcon','DefaultIcon')) {
             if(!$iss.Contains($token)) { throw "Instalador 3.8.0 incompleto: $token" }
           }
 
