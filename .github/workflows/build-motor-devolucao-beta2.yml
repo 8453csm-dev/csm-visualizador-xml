@@ -1,0 +1,158 @@
+name: Build Motor Devolucao Beta 2
+
+on:
+  push:
+    branches: ["feature/motor-devolucao-fiscal"]
+    paths:
+      - "installer-v2/**"
+      - ".github/workflows/build-motor-devolucao-beta2.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
+      - name: Baixar base estavel 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 `
+            --repo 8453csm-dev/csm-visualizador-xml `
+            --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            --dir temp
+
+      - name: Extrair payload e aplicar correcoes existentes
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py `
+            "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            "installer-completo/enhancer_v8.html" `
+            "installer-v2/payload"
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_lookup_order.py
+          python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          node --check installer-v2/devolution_engine_v2_patch.js
+          node installer-v2/test_devolution_engine.js
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "CSM_DEVOLUTION_ENGINE_V2" -Quiet)) { throw "Motor Fiscal Beta 2 nao aplicado" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/refinement.css" -Pattern "CSM_DEVOLUTION_ENGINE_V2" -Quiet)) { throw "CSS Beta 2 nao aplicado" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "DADOS DOS PRODUTOS / SERVIÇOS" -Quiet)) { throw "Modelo DANFE-like nao aplicado" }
+          if (!(Select-String -Path "installer-v2/payload/_internal/web/app.js" -Pattern "document.title=newTitle" -Quiet)) { throw "Nome Devolucao da NF nao aplicado ao PDF" }
+
+      - name: Aplicar instancia unica estrita
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_SINGLE_INSTANCE_STRICT_V2" -Quiet)) { throw "Instancia unica nao aplicada" }
+
+      - name: Compilar helper Windows Consulta DANFE
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_lookup.py
+          New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
+          $fx = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
+          $csc = Join-Path $fx "csc.exe"
+          $uiaClient = Join-Path $fx "WPF\UIAutomationClient.dll"
+          $uiaTypes = Join-Path $fx "WPF\UIAutomationTypes.dll"
+          $forms = Join-Path $fx "System.Windows.Forms.dll"
+          $source = (Resolve-Path "installer-v2/launcher/consulta_danfe_helper.cs").Path
+          $helperOut = Join-Path (Resolve-Path "installer-v2/payload/_internal/csm").Path "CSM Consulta DANFE Helper.exe"
+          & $csc /nologo /target:winexe /optimize+ /platform:x64 `
+            "/out:$helperOut" `
+            "/reference:$uiaClient" "/reference:$uiaTypes" "/reference:$forms" `
+            $source
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $helperOut)) { throw "Falha ao compilar helper Consulta DANFE" }
+          if (Get-ChildItem "installer-v2/payload/_internal/csm" -Filter *.ps1 -ErrorAction SilentlyContinue) { throw "Payload contem PowerShell indevido" }
+
+      - name: Compilar launcher
+        shell: pwsh
+        run: |
+          $original = "installer-v2/payload/CSM Visualizador XML.exe"
+          $core = "installer-v2/payload/CSM Visualizador XML Core.exe"
+          Move-Item -Force $original $core
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags="-H windowsgui -s -w" `
+            -o "installer-v2/payload/CSM Visualizador XML.exe" `
+            "installer-v2/launcher/main.go"
+          if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher nao gerado" }
+          if (!(Test-Path $core)) { throw "Core original nao preservado" }
+          $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if ($self.ExitCode -ne 0) { throw "Self-test do launcher falhou" }
+
+      - name: Gerar identidade visual
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python installer-v2/make_brand.py
+
+      - name: Instalar Inno Setup 6
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (!(Test-Path $iscc)) { throw "ISCC.exe nao encontrado" }
+
+      - name: Compilar instalador
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
+          $exe = "dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe"
+          if (!(Test-Path $exe)) { throw "Instalador nao gerado" }
+          Copy-Item -Force $exe "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe"
+          Copy-Item -Force $exe "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
+
+      - name: Teste de limpeza e associacao XML
+        shell: pwsh
+        run: ./installer-v2/test_clean_association.ps1
+
+      - name: Teste real de instalacao e desinstalacao
+        shell: pwsh
+        run: ./installer-v2/test_installed.ps1
+
+      - name: Validar payload final
+        shell: pwsh
+        run: |
+          node installer-v2/test_devolution_engine.js
+          $app = "installer-v2/payload/_internal/web/app.js"
+          foreach($token in @("CSM_DEVOLUTION_ENGINE_V2","Devolução da NF","Selecionar encontrados","CÁLCULO DO IMPOSTO","TRANSPORTADOR / VOLUMES TRANSPORTADOS","DADOS DOS PRODUTOS / SERVIÇOS","não aparece no PDF do cliente")) {
+            if (!(Select-String -Path $app -Pattern $token -SimpleMatch -Quiet)) { throw "Token Beta 2 ausente: $token" }
+          }
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe"
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$sha  CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe" | Set-Content -Encoding ascii "dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 - SHA256.txt"
+          Write-Host "SHA256=$sha"
+
+      - name: Publicar artefato Beta 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-Motor-Devolucao-Fiscal-Beta-2
+          path: |
+            dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2.exe
+            dist/CSM Visualizador XML - Motor Fiscal de Devolucao - Beta 2 - SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
