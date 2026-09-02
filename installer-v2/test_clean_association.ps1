@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo-Limpo.exe").Path
+$installer = (Resolve-Path "dist/CSM Visualizador XML 3.8.0 - Instalador Completo.exe").Path
 $testDir = Join-Path $env:TEMP "CSMVisualizadorXML-Limpo-Homologacao"
 $legacy1 = Join-Path $env:LOCALAPPDATA "CSMVisualizadorXML"
 $legacy2 = Join-Path $env:LOCALAPPDATA "CSM Visualizador XML 4"
@@ -32,8 +32,12 @@ if ($p.ExitCode -ne 0) { throw "Instalação silenciosa falhou: $($p.ExitCode)" 
 
 $main = Join-Path $testDir "CSM Visualizador XML.exe"
 $uninstaller = Join-Path $testDir "unins000.exe"
+$buildInfo = Join-Path $testDir "_internal\csm\build-info.json"
 if (!(Test-Path $main)) { throw "Executável atual não foi instalado" }
 if (!(Test-Path $uninstaller)) { throw "Desinstalador atual não foi instalado" }
+if (!(Test-Path $buildInfo)) { throw "Identidade 3.8.0 não foi instalada" }
+$bi = Get-Content $buildInfo -Raw | ConvertFrom-Json
+if ($bi.version -ne '3.8.0') { throw "Limpeza terminou com versão incorreta: $($bi.version)" }
 if (Test-Path $legacy1) { throw "Pasta residual antiga permaneceu: $legacy1" }
 if (Test-Path $legacy2) { throw "Pasta Alpha antiga permaneceu: $legacy2" }
 if (Test-Path "Registry::HKEY_CURRENT_USER\Software\Classes\Applications\CSMVisualizadorXML.exe") { throw "Registro do executável antigo permaneceu" }
@@ -59,7 +63,7 @@ if ($progCmd -notmatch $expectedExe) { throw "ProgID aponta para caminho incorre
 if ($assoc -ne 'CSM.VisualizadorXML.xml') { throw "Associação .xml incorreta: $assoc" }
 if ($registered -ne 'Software\CSM\CSM Visualizador XML\Capabilities') { throw "RegisteredApplications incorreto: $registered" }
 
-Write-Host "Limpeza total e novo registro XML validados."
+Write-Host "Limpeza total, versão 3.8.0 e novo registro XML validados."
 
 Stop-CSMProcesses
 $u = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
