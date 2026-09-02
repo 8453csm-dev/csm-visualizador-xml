@@ -1,0 +1,6 @@
+/* CSM_DEVOLUTION_ENGINE_V3 */
+.csm-dev-st-mode{grid-column:1/-1!important;background:linear-gradient(180deg,rgba(45,129,226,.10),rgba(45,129,226,.04));border:1px solid rgba(95,169,255,.32)!important;border-radius:10px;padding:10px 12px!important}
+.csm-dev-st-mode select{margin-top:6px!important}
+.csm-dev-st-mode small{display:block;margin-top:6px;color:#8fa9c4;font-size:10px;line-height:1.45}
+body.light .csm-dev-st-mode{background:#f2f8ff;border-color:#b9d8f6!important}
+body.light .csm-dev-st-mode small{color:#526f8c}
