@@ -66,15 +66,20 @@ Name: "{userprograms}\CSM Visualizador XML\Desinstalar CSM Visualizador XML"; Fi
 
 [Registry]
 Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "CSM Visualizador XML"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\_internal\assets\CSMVisualizadorXML.ico,0"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe\shell\open"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\_internal\assets\CSMVisualizadorXML.ico,0"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Applications\CSM Visualizador XML.exe\SupportedTypes"; ValueType: string; ValueName: ".xml"; ValueData: ""; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#XmlProgId}"; ValueType: string; ValueName: ""; ValueData: "Documento XML - CSM Visualizador XML"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\{#XmlProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\_internal\assets\CSMVisualizadorXML.ico"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\{#XmlProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\_internal\assets\CSMVisualizadorXML.ico,0"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#XmlProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\CSM\CSM Visualizador XML\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "CSM Visualizador XML"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\CSM\CSM Visualizador XML\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Visualizador e analisador de documentos fiscais XML da CSM"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\CSM\CSM Visualizador XML\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\_internal\assets\CSMVisualizadorXML.ico,0"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\CSM\CSM Visualizador XML\Capabilities\FileAssociations"; ValueType: string; ValueName: ".xml"; ValueData: "{#XmlProgId}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "CSM Visualizador XML"; ValueData: "Software\CSM\CSM Visualizador XML\Capabilities"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\CSM Visualizador XML.exe"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\CSM Visualizador XML.exe"; ValueType: string; ValueName: "Path"; ValueData: "{app}"; Flags: uninsdeletekey
 
 [Run]
 Filename: "ms-settings:defaultapps?registeredAppUser=CSM%20Visualizador%20XML"; Description: "Escolher CSM Visualizador XML como padrão para arquivos XML"; Flags: shellexec postinstall skipifsilent; Tasks: defaultxml
