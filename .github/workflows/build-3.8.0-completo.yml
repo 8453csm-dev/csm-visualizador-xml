@@ -1,0 +1,212 @@
+name: Build CSM Visualizador XML 3.8.0 Completo
+
+on:
+  push:
+    branches: ["feature/motor-devolucao-fiscal"]
+    paths:
+      - "installer-v2/**"
+      - ".github/workflows/build-3.8.0-completo.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
+      - name: Baixar base estavel 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 `
+            --repo 8453csm-dev/csm-visualizador-xml `
+            --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            --dir temp
+
+      - name: Montar payload completo 3.8.0
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py `
+            "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" `
+            "installer-completo/enhancer_v8.html" `
+            "installer-v2/payload"
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_lookup_order.py
+          python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_release_identity.py `
+            "installer-v2/payload/_internal/web" `
+            "installer-v2/payload/_internal/csm"
+
+          node installer-v2/test_devolution_engine.js
+          node installer-v2/test_devolution_engine_v3.js
+          node --check installer-v2/devolution_engine_v3_patch.js
+
+          $app = "installer-v2/payload/_internal/web/app.js"
+          Copy-Item -Force $app "temp/csm-app-3.8.0.mjs"
+          node --check "temp/csm-app-3.8.0.mjs"
+          if ($LASTEXITCODE -ne 0) { throw "app.js final invalido como ES module" }
+
+          foreach($token in @(
+            "CSM_MULTI_TAB_BRIDGE_V1",
+            "CSM_LOCATOR_FIX_V1",
+            "CSM_DEVOLUTION_ENGINE_V1",
+            "CSM_DEVOLUTION_ENGINE_V2",
+            "CSM_DEVOLUTION_ENGINE_V3",
+            "CSM_RELEASE_IDENTITY_3_8_0",
+            "Usar campo próprio VALOR DO ICMS-ST",
+            "Emissor não aceita ST: usar OUTRAS DESPESAS",
+            "prod-detail"
+          )) {
+            if (!(Select-String -Path $app -Pattern $token -SimpleMatch -Quiet)) { throw "Componente obrigatório ausente: $token" }
+          }
+          $buildInfo = "installer-v2/payload/_internal/csm/build-info.json"
+          if (!(Test-Path $buildInfo)) { throw "build-info.json ausente" }
+          $bi = Get-Content $buildInfo -Raw | ConvertFrom-Json
+          if ($bi.version -ne "3.8.0" -or $bi.motor_devolucao -ne "1.2.0") { throw "Identidade do build incorreta" }
+
+      - name: Aplicar instancia unica estrita
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          if (!(Select-String -Path "installer-v2/launcher/main.go" -Pattern "CSM_SINGLE_INSTANCE_STRICT_V2" -Quiet)) { throw "Instancia unica nao aplicada" }
+
+      - name: Compilar helper Windows Consulta DANFE
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_lookup.py
+          New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
+          $fx = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
+          $csc = Join-Path $fx "csc.exe"
+          $uiaClient = Join-Path $fx "WPF\UIAutomationClient.dll"
+          $uiaTypes = Join-Path $fx "WPF\UIAutomationTypes.dll"
+          $forms = Join-Path $fx "System.Windows.Forms.dll"
+          $source = (Resolve-Path "installer-v2/launcher/consulta_danfe_helper.cs").Path
+          $helperOut = Join-Path (Resolve-Path "installer-v2/payload/_internal/csm").Path "CSM Consulta DANFE Helper.exe"
+          & $csc /nologo /target:winexe /optimize+ /platform:x64 `
+            "/out:$helperOut" `
+            "/reference:$uiaClient" "/reference:$uiaTypes" "/reference:$forms" `
+            $source
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $helperOut)) { throw "Falha ao compilar helper Consulta DANFE" }
+          if (Get-ChildItem "installer-v2/payload/_internal/csm" -Filter *.ps1 -ErrorAction SilentlyContinue) { throw "Payload contem PowerShell indevido" }
+
+      - name: Compilar launcher
+        shell: pwsh
+        run: |
+          $original = "installer-v2/payload/CSM Visualizador XML.exe"
+          $core = "installer-v2/payload/CSM Visualizador XML Core.exe"
+          Move-Item -Force $original $core
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags="-H windowsgui -s -w" `
+            -o "installer-v2/payload/CSM Visualizador XML.exe" `
+            "installer-v2/launcher/main.go"
+          if (!(Test-Path "installer-v2/payload/CSM Visualizador XML.exe")) { throw "Launcher nao gerado" }
+          if (!(Test-Path $core)) { throw "Core original nao preservado" }
+          $self = Start-Process -FilePath "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if ($self.ExitCode -ne 0) { throw "Self-test do launcher falhou" }
+
+      - name: Gerar identidade visual do instalador
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python installer-v2/make_brand.py
+
+      - name: Instalar Inno Setup 6
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (!(Test-Path $iscc)) { throw "ISCC.exe nao encontrado" }
+
+      - name: Validar instalador em portugues e versao
+        shell: pwsh
+        run: |
+          $iss = Get-Content "installer-v2/CSMVisualizadorXML.iss" -Raw
+          foreach($token in @('AppVersion "3.8.0"','BrazilianPortuguese.isl','NOVIDADES DESTA VERSÃO','Motor Fiscal de Devolução','ICMS-ST')) {
+            if(!$iss.Contains($token)) { throw "Instalador 3.8.0 incompleto: $token" }
+          }
+
+      - name: Compilar instalador completo
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer-v2/CSMVisualizadorXML.iss"
+          $base = "dist/CSMVisualizadorXML-3.8.0-Instalador-Completo.exe"
+          if (!(Test-Path $base)) { throw "Instalador 3.8.0 nao gerado" }
+          Copy-Item -Force $base "dist/CSM Visualizador XML 3.8.0 - Instalador Completo.exe"
+          Copy-Item -Force $base "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe"
+          $vi=(Get-Item $base).VersionInfo
+          Write-Host "ProductVersion=$($vi.ProductVersion) FileVersion=$($vi.FileVersion)"
+          if($vi.ProductVersion -notlike '3.8.0*') { throw "Metadado ProductVersion do instalador incorreto" }
+
+      - name: Testar versao realmente instalada
+        shell: pwsh
+        run: |
+          $installer=(Resolve-Path "dist/CSM Visualizador XML 3.8.0 - Instalador Completo.exe").Path
+          $dir=Join-Path $env:TEMP "CSM-380-Version-Test"
+          Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+          $p=Start-Process $installer -ArgumentList ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="'+$dir+'"') -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Instalacao de validacao falhou"}
+          $info=Join-Path $dir "_internal\csm\build-info.json"
+          $app=Join-Path $dir "_internal\web\app.js"
+          if(!(Test-Path $info)){throw "build-info nao chegou a instalacao real"}
+          $bi=Get-Content $info -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.8.0'){throw "Maquina recebeu versao errada: $($bi.version)"}
+          foreach($token in @('CSM_DEVOLUTION_ENGINE_V3','CSM_RELEASE_IDENTITY_3_8_0')){
+            if(!(Select-String -Path $app -Pattern $token -SimpleMatch -Quiet)){throw "Instalacao real sem $token"}
+          }
+          $un=Join-Path $dir "unins000.exe"
+          if(Test-Path $un){Start-Process $un -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait}
+
+      - name: Teste de limpeza e associacao XML
+        shell: pwsh
+        run: ./installer-v2/test_clean_association.ps1
+
+      - name: Teste real de instalacao abas e desinstalacao
+        shell: pwsh
+        run: ./installer-v2/test_installed.ps1
+
+      - name: Validar payload final novamente
+        shell: pwsh
+        run: |
+          node installer-v2/test_devolution_engine_v3.js
+          $app = "installer-v2/payload/_internal/web/app.js"
+          Copy-Item -Force $app "temp/csm-app-final-3.8.0.mjs"
+          node --check "temp/csm-app-final-3.8.0.mjs"
+          if ($LASTEXITCODE -ne 0) { throw "app.js final deixou de ser modulo ES valido" }
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $exe = "dist/CSM Visualizador XML 3.8.0 - Instalador Completo.exe"
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$sha  CSM Visualizador XML 3.8.0 - Instalador Completo.exe" | Set-Content -Encoding ascii "dist/CSM Visualizador XML 3.8.0 - SHA256.txt"
+          Write-Host "SHA256=$sha"
+
+      - name: Publicar artefato 3.8.0 completo
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-3.8.0-Instalador-Completo
+          path: |
+            dist/CSM Visualizador XML 3.8.0 - Instalador Completo.exe
+            dist/CSM Visualizador XML 3.8.0 - SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
