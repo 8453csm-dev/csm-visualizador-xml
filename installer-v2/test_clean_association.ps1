@@ -33,37 +33,64 @@ if ($p.ExitCode -ne 0) { throw "Instalação silenciosa falhou: $($p.ExitCode)" 
 $main = Join-Path $testDir "CSM Visualizador XML.exe"
 $uninstaller = Join-Path $testDir "unins000.exe"
 $buildInfo = Join-Path $testDir "_internal\csm\build-info.json"
+$appJs = Join-Path $testDir "_internal\web\app.js"
+$iconFile = Join-Path $testDir "_internal\assets\CSMVisualizadorXML.ico"
 if (!(Test-Path $main)) { throw "Executável atual não foi instalado" }
 if (!(Test-Path $uninstaller)) { throw "Desinstalador atual não foi instalado" }
 if (!(Test-Path $buildInfo)) { throw "Identidade 3.8.0 não foi instalada" }
+if (!(Test-Path $appJs)) { throw "Frontend instalado não foi encontrado" }
+if (!(Test-Path $iconFile)) { throw "Ícone profissional do CSM não foi instalado" }
 $bi = Get-Content $buildInfo -Raw | ConvertFrom-Json
 if ($bi.version -ne '3.8.0') { throw "Limpeza terminou com versão incorreta: $($bi.version)" }
+
+$aboutToken = "els.aboutVersion.textContent='Versão 3.8.0'"
+$aboutMatches = @(Select-String -Path $appJs -Pattern $aboutToken -SimpleMatch -AllMatches)
+if ($aboutMatches.Count -eq 0 -or $aboutMatches[0].Matches.Count -lt 2) {
+    throw "A versão visual do modal Sobre ainda não está fixada em 3.8.0"
+}
+if (Select-String -Path $appJs -Pattern 'aboutVersion.textContent=`Versão ${r?.version' -SimpleMatch -Quiet) {
+    throw "Modal Sobre ainda depende do get_app_info() antigo"
+}
+
 if (Test-Path $legacy1) { throw "Pasta residual antiga permaneceu: $legacy1" }
 if (Test-Path $legacy2) { throw "Pasta Alpha antiga permaneceu: $legacy2" }
 if (Test-Path "Registry::HKEY_CURRENT_USER\Software\Classes\Applications\CSMVisualizadorXML.exe") { throw "Registro do executável antigo permaneceu" }
 if (Test-Path "Registry::HKEY_CURRENT_USER\Software\Classes\CSMVisualizadorXML.xml") { throw "ProgID antigo permaneceu" }
 
 $appCmdKey = "Registry::HKEY_CURRENT_USER\Software\Classes\Applications\CSM Visualizador XML.exe\shell\open\command"
+$appIconKey = "Registry::HKEY_CURRENT_USER\Software\Classes\Applications\CSM Visualizador XML.exe\DefaultIcon"
 $progCmdKey = "Registry::HKEY_CURRENT_USER\Software\Classes\CSM.VisualizadorXML.xml\shell\open\command"
-$capKey = "Registry::HKEY_CURRENT_USER\Software\CSM\CSM Visualizador XML\Capabilities\FileAssociations"
+$progIconKey = "Registry::HKEY_CURRENT_USER\Software\Classes\CSM.VisualizadorXML.xml\DefaultIcon"
+$capRoot = "Registry::HKEY_CURRENT_USER\Software\CSM\CSM Visualizador XML\Capabilities"
+$capKey = "$capRoot\FileAssociations"
 $registeredKey = "Registry::HKEY_CURRENT_USER\Software\RegisteredApplications"
+$appPathKey = "Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\CSM Visualizador XML.exe"
 
-if (!(Test-Path $appCmdKey)) { throw "Comando atual de Abrir com não foi registrado" }
-if (!(Test-Path $progCmdKey)) { throw "ProgID atual não foi registrado" }
-if (!(Test-Path $capKey)) { throw "Capabilities de associação não foram registradas" }
+foreach ($key in @($appCmdKey,$appIconKey,$progCmdKey,$progIconKey,$capRoot,$capKey,$appPathKey)) {
+    if (!(Test-Path $key)) { throw "Registro profissional ausente: $key" }
+}
 
 $appCmd = (Get-ItemProperty -Path $appCmdKey).'(default)'
+$appIcon = (Get-ItemProperty -Path $appIconKey).'(default)'
 $progCmd = (Get-ItemProperty -Path $progCmdKey).'(default)'
+$progIcon = (Get-ItemProperty -Path $progIconKey).'(default)'
+$capIcon = (Get-ItemProperty -Path $capRoot).'ApplicationIcon'
 $assoc = (Get-ItemProperty -Path $capKey).'.xml'
 $registered = (Get-ItemProperty -Path $registeredKey).'CSM Visualizador XML'
+$appPath = (Get-ItemProperty -Path $appPathKey).'(default)'
 
 $expectedExe = [Regex]::Escape($main)
+$expectedIcon = [Regex]::Escape($iconFile)
 if ($appCmd -notmatch $expectedExe) { throw "Abrir com aponta para caminho incorreto: $appCmd" }
 if ($progCmd -notmatch $expectedExe) { throw "ProgID aponta para caminho incorreto: $progCmd" }
+if ($appPath -notmatch $expectedExe) { throw "App Paths aponta para caminho incorreto: $appPath" }
+if ($appIcon -notmatch $expectedIcon) { throw "Applications DefaultIcon incorreto: $appIcon" }
+if ($progIcon -notmatch $expectedIcon) { throw "ProgID DefaultIcon incorreto: $progIcon" }
+if ($capIcon -notmatch $expectedIcon) { throw "Capabilities ApplicationIcon incorreto: $capIcon" }
 if ($assoc -ne 'CSM.VisualizadorXML.xml') { throw "Associação .xml incorreta: $assoc" }
 if ($registered -ne 'Software\CSM\CSM Visualizador XML\Capabilities') { throw "RegisteredApplications incorreto: $registered" }
 
-Write-Host "Limpeza total, versão 3.8.0 e novo registro XML validados."
+Write-Host "Limpeza total, modal Sobre 3.8.0 e identidade visual da associação XML validados."
 
 Stop-CSMProcesses
 $u = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
