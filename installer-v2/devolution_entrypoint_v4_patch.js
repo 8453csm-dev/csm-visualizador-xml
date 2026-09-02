@@ -27,6 +27,7 @@ function csmDevEnsureEntryPoint(){
   count++;
  });
  if(window.CSM_DEVOLUTION_ENGINE){
+  window.CSM_DEVOLUTION_ENGINE.version=CSM_DEV_ENTRYPOINT_VERSION;
   window.CSM_DEVOLUTION_ENGINE.entrypointVersion=CSM_DEV_ENTRYPOINT_VERSION;
   window.CSM_DEVOLUTION_ENGINE.ensureEntryPoint=csmDevEnsureEntryPoint;
  }
@@ -47,30 +48,24 @@ function csmDevQueueEntrySync(){
 function csmDevStartupEntrySync(){
  csmDevEnsureEntryPoint();
  if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>csmDevEnsureEntryPoint());
- // Cobre WebView rápido, lento e primeira execução em máquina limpa sem polling permanente.
  [50,250,750,1500,3000,6000].forEach(ms=>setTimeout(()=>csmDevEnsureEntryPoint(),ms));
 }
 
-// Execução imediata: corrige o caso em que #relationsSection já existia antes do observer antigo.
 csmDevStartupEntrySync();
 
-if(document.readyState==='loading'){
- document.addEventListener('DOMContentLoaded',csmDevStartupEntrySync,{once:true});
-}else{
- csmDevQueueEntrySync();
-}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',csmDevStartupEntrySync,{once:true});
+else csmDevQueueEntrySync();
 window.addEventListener('load',csmDevStartupEntrySync,{once:true});
 
-// Segurança para renderizações posteriores/importação/troca de documento.
 const csmDevEntryObserver=new MutationObserver(()=>csmDevQueueEntrySync());
 const csmDevObserveRoot=document.body||document.documentElement;
 if(csmDevObserveRoot)csmDevEntryObserver.observe(csmDevObserveRoot,{childList:true,subtree:true});
 
-// Trocas de nota e abas podem reaproveitar DOM; sincroniza após interações sem depender de mutation timing.
 document.addEventListener('click',()=>setTimeout(csmDevQueueEntrySync,0),true);
 document.addEventListener('change',()=>setTimeout(csmDevQueueEntrySync,0),true);
 
 if(window.CSM_DEVOLUTION_ENGINE){
+ window.CSM_DEVOLUTION_ENGINE.version=CSM_DEV_ENTRYPOINT_VERSION;
  window.CSM_DEVOLUTION_ENGINE.entrypointVersion=CSM_DEV_ENTRYPOINT_VERSION;
  window.CSM_DEVOLUTION_ENGINE.ensureEntryPoint=csmDevEnsureEntryPoint;
 }
