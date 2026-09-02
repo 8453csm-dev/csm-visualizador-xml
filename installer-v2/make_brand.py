@@ -42,5 +42,27 @@ def small():
     d.rectangle((8,43,47,47), fill=GREEN)
     im.save(OUT/'wizard-small.bmp')
 
-wizard(); small()
+def normalize_installer_script():
+    """Mantém o instalador no mesmo perfil do usuário que executa o CSM.
+
+    O produto usa LocalAppData/HKCU/atalhos do usuário. Pedir elevação UAC faria
+    essas áreas apontarem para o usuário administrador informado na credencial,
+    podendo deixar o usuário original preso a um atalho/versão antiga.
+    """
+    iss = OUT / 'CSMVisualizadorXML.iss'
+    if not iss.exists():
+        raise SystemExit(f'Arquivo do instalador não encontrado: {iss}')
+    text = iss.read_text(encoding='utf-8')
+    text = text.replace('PrivilegesRequired=admin', 'PrivilegesRequired=lowest')
+    text = text.replace('WizardResizable=no\n', '')
+    text = text.replace('UninstallDisplayVersion={#AppVersion}\n', '')
+    iss.write_text(text, encoding='utf-8', newline='\n')
+    final = iss.read_text(encoding='utf-8')
+    if 'PrivilegesRequired=lowest' not in final:
+        raise SystemExit('Instalador não foi normalizado para instalação per-user')
+    if 'PrivilegesRequired=admin' in final:
+        raise SystemExit('Instalador ainda solicita administrador indevidamente')
+    print('Installer normalized: per-user, sem UAC e sem diretivas obsoletas')
+
+wizard(); small(); normalize_installer_script()
 print('Brand assets generated')
