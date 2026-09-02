@@ -28,6 +28,37 @@ def patch_text(text: str) -> tuple[str, int]:
     return text, changed
 
 
+def patch_about_runtime(text: str) -> tuple[str, int]:
+    """A base 3.7.8 devolve a versão pelo backend Python via get_app_info().
+
+    A 3.8.0 reaproveita esse core estável, portanto o número técnico retornado pelo
+    backend continua 3.7.8. A identidade do release, porém, pertence ao pacote final.
+    Forçamos somente a apresentação visual da versão no frontend, sem mexer nas APIs
+    fiscais nem no motor estável.
+    """
+    changed = 0
+
+    patterns = [
+        (
+            r"els\.aboutVersion\.textContent\s*=\s*`Versão\s+\$\{r\?\.version\|\|['\"]3\.0\.1['\"]\}`",
+            f"els.aboutVersion.textContent='Versão {APP_VERSION}'",
+        ),
+        (
+            r"els\.aboutVersion\.textContent\s*=\s*`Versão\s+\$\{r\.current\|\|['\"](?:3\.7\.8|3\.8\.0)['\"]\}`",
+            f"els.aboutVersion.textContent='Versão {APP_VERSION}'",
+        ),
+    ]
+    for pattern, repl in patterns:
+        text, n = re.subn(pattern, repl, text)
+        changed += n
+
+    # Se o modal já tiver sido corrigido por uma execução anterior, isso é válido.
+    if f"els.aboutVersion.textContent='Versão {APP_VERSION}'" not in text:
+        raise SystemExit('Não foi possível localizar/corrigir a origem real da versão no modal Sobre')
+
+    return text, changed
+
+
 def patch_frontend(web: Path) -> int:
     total = 0
     touched: list[str] = []
@@ -38,7 +69,12 @@ def patch_frontend(web: Path) -> int:
             text = path.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
+
         updated, changed = patch_text(text)
+        if path.name.lower() == 'app.js':
+            updated, about_changed = patch_about_runtime(updated)
+            changed += about_changed
+
         if changed:
             path.write_text(updated, encoding='utf-8', newline='\n')
             total += changed
@@ -65,6 +101,14 @@ def validate_no_visible_old_version(web: Path) -> None:
             offenders.append(str(path.relative_to(web)))
     if offenders:
         raise SystemExit('Versão antiga ainda pode ser exibida no frontend: ' + ', '.join(offenders))
+
+    app = web / 'app.js'
+    app_text = app.read_text(encoding='utf-8')
+    expected = f"els.aboutVersion.textContent='Versão {APP_VERSION}'"
+    if app_text.count(expected) < 2:
+        raise SystemExit('Modal Sobre e verificação automática não estão fixados na versão 3.8.0')
+    if re.search(r"aboutVersion\.textContent\s*=\s*`Versão\s+\$\{[^}]*?(?:version|current)", app_text):
+        raise SystemExit('A versão visível ainda depende do backend antigo')
 
 
 def main() -> int:
@@ -110,7 +154,7 @@ def main() -> int:
         raise SystemExit('Falha ao validar marcador de identidade 3.8.0 no app.js')
     if APP_VERSION not in version_file.read_text(encoding='utf-8'):
         raise SystemExit('VERSION.txt não foi atualizado para 3.8.0')
-    print('build-info.json, VERSION.txt e frontend validados como versão 3.8.0')
+    print('build-info.json, VERSION.txt e modal Sobre validados como versão 3.8.0')
     return 0
 
 
