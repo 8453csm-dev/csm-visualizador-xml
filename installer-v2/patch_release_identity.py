@@ -9,38 +9,62 @@ BUILD_NAME = 'Motor Fiscal de Devolução 1.2'
 MARKER = 'CSM_RELEASE_IDENTITY_3_8_0'
 
 
-def patch_app(app: Path) -> int:
-    text = app.read_text(encoding='utf-8')
-    original = text
-    # Atualiza apenas identificadores de versão do aplicativo / tela Sobre.
+def patch_text(text: str) -> tuple[str, int]:
     patterns = [
         (r"(?i)(APP_VERSION\s*=\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
         (r"(?i)(CURRENT_VERSION\s*=\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
-        (r"(?i)(VERSION\s*=\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
-        (r"(?i)(version\s*:\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
+        (r"(?i)(\bappVersion\b\s*[:=]\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
+        (r"(?i)(\bcurrentVersion\b\s*[:=]\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
+        (r"(?i)(\bVERSION\b\s*=\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
+        (r"(?i)(\bversion\b\s*:\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
+        (r"(?i)(data-version\s*=\s*['\"])3\.7\.8(?:\.\d+)?(['\"])", rf"\g<1>{APP_VERSION}\g<2>"),
         (r"(?i)(Versão\s+)3\.7\.8(?:\.\d+)?", rf"\g<1>{APP_VERSION}"),
+        (r"(?i)(Versao\s+)3\.7\.8(?:\.\d+)?", rf"\g<1>{APP_VERSION}"),
     ]
     changed = 0
     for pattern, repl in patterns:
         text, n = re.subn(pattern, repl, text)
         changed += n
+    return text, changed
 
-    # Fallback seguro para builds antigos onde a versão aparece apenas como texto
-    # na tela Sobre, sem alterar URLs históricos de releases.
-    if changed == 0 and '3.7.8' in text:
-        before = text.count('3.7.8')
-        text = text.replace("'3.7.8'", f"'{APP_VERSION}'").replace('"3.7.8"', f'"{APP_VERSION}"')
-        text = text.replace('Versão 3.7.8', f'Versão {APP_VERSION}')
-        changed += before - text.count('3.7.8')
 
-    if MARKER not in text:
-        text = text.rstrip() + f"\n// {MARKER} — {APP_VERSION} — {BUILD_NAME}\n"
+def patch_frontend(web: Path) -> int:
+    total = 0
+    touched: list[str] = []
+    for path in sorted(web.rglob('*')):
+        if not path.is_file() or path.suffix.lower() not in {'.js', '.html', '.css', '.json'}:
+            continue
+        try:
+            text = path.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            continue
+        updated, changed = patch_text(text)
+        if changed:
+            path.write_text(updated, encoding='utf-8', newline='\n')
+            total += changed
+            touched.append(f'{path.name}:{changed}')
+    print('Identidade 3.8.0 aplicada no frontend:', ', '.join(touched) if touched else 'nenhum arquivo adicional')
+    return total
 
-    if text == original:
-        raise SystemExit('Nenhuma identidade de versão foi aplicada ao app.js')
-    app.write_text(text, encoding='utf-8', newline='\n')
-    print(f'Identidade do aplicativo atualizada para {APP_VERSION}; ocorrências ajustadas: {changed}')
-    return changed
+
+def validate_no_visible_old_version(web: Path) -> None:
+    offenders: list[str] = []
+    visible_old = re.compile(r'(?i)(Versão|Versao)\s+3\.7\.8(?:\.\d+)?')
+    version_binding_old = re.compile(
+        r"(?i)(APP_VERSION|CURRENT_VERSION|appVersion|currentVersion|\bVERSION\b|data-version)"
+        r"[^\n]{0,40}3\.7\.8(?:\.\d+)?"
+    )
+    for path in sorted(web.rglob('*')):
+        if not path.is_file() or path.suffix.lower() not in {'.js', '.html', '.css', '.json'}:
+            continue
+        try:
+            text = path.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            continue
+        if visible_old.search(text) or version_binding_old.search(text):
+            offenders.append(str(path.relative_to(web)))
+    if offenders:
+        raise SystemExit('Versão antiga ainda pode ser exibida no frontend: ' + ', '.join(offenders))
 
 
 def main() -> int:
@@ -52,7 +76,17 @@ def main() -> int:
     app = web / 'app.js'
     if not app.is_file():
         raise SystemExit(f'app.js não encontrado em {web}')
-    patch_app(app)
+
+    changed = patch_frontend(web)
+    text = app.read_text(encoding='utf-8')
+    if MARKER not in text:
+        text = text.rstrip() + f"\n// {MARKER} — {APP_VERSION} — {BUILD_NAME}\n"
+        app.write_text(text, encoding='utf-8', newline='\n')
+    if changed == 0:
+        print('Aviso: nenhuma ocorrência antiga precisou ser substituída; identidade será validada pelo marcador e build-info.')
+
+    validate_no_visible_old_version(web)
+
     csm.mkdir(parents=True, exist_ok=True)
     payload_root = web.parent.parent
     version_file = payload_root / 'VERSION.txt'
@@ -70,12 +104,13 @@ def main() -> int:
         'base_runtime': '3.7.8',
     }
     (csm / 'build-info.json').write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding='utf-8')
+
     final = app.read_text(encoding='utf-8')
-    if MARKER not in final or APP_VERSION not in final:
-        raise SystemExit('Falha ao validar identidade 3.8.0 no app.js')
+    if MARKER not in final:
+        raise SystemExit('Falha ao validar marcador de identidade 3.8.0 no app.js')
     if APP_VERSION not in version_file.read_text(encoding='utf-8'):
         raise SystemExit('VERSION.txt não foi atualizado para 3.8.0')
-    print('build-info.json e VERSION.txt criados; versão final 3.8.0 validada')
+    print('build-info.json, VERSION.txt e frontend validados como versão 3.8.0')
     return 0
 
 
