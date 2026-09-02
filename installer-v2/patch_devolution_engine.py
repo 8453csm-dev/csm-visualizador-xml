@@ -10,6 +10,20 @@ STYLE_V1 = BASE / 'devolution_engine.css'
 SNIPPET_V2 = BASE / 'devolution_engine_v2_patch.js'
 STYLE_V2 = BASE / 'devolution_engine_v2.css'
 
+# Funcoes que ja existem na V1. Em app.js carregado como ES module, declarar
+# novamente o mesmo identificador pode impedir o modulo inteiro de carregar.
+V2_OVERRIDES = (
+    'csmDevLoadDraft',
+    'csmDevGeneralFields',
+    'csmDevLineCard',
+    'csmDevRender',
+    'csmDevBind',
+    'csmDevGuideHtml',
+    'csmDevDownloadGuide',
+    'csmDevPrintGuide',
+    'csmDevOpen',
+)
+
 
 def append_marker(path: Path, payload: str, marker: str, label: str) -> None:
     text = path.read_text(encoding='utf-8')
@@ -21,12 +35,24 @@ def append_marker(path: Path, payload: str, marker: str, label: str) -> None:
 
 
 def sanitize_v2(payload: str) -> str:
-    # A primeira Beta 2 continha um regex quebrado por uma quebra física de linha
-    # dentro de /.../, o que fazia o app.js inteiro deixar de carregar no WebView.
-    # Corrigimos antes de injetar no aplicativo e falhamos se o padrão inválido restar.
+    # Corrige a quebra fisica de linha que apareceu no replace das observacoes.
     broken = "replace(/\\\n/g,'<br>')"
     fixed = "replace(/\\n/g,'<br>')"
     payload = payload.replace(broken, fixed)
+
+    # A V2 e uma camada de melhoria sobre a V1. Em vez de redeclarar funcoes no
+    # mesmo ES module, substitui o valor da funcao existente de forma explicita.
+    for name in V2_OVERRIDES:
+        declaration = f'function {name}('
+        assignment = f'{name}=function('
+        if declaration not in payload:
+            raise SystemExit(f'Override esperado ausente na Beta 2: {name}')
+        payload = payload.replace(declaration, assignment, 1)
+
+    # Garantias que evitam contaminar o modulo principal novamente.
+    for name in V2_OVERRIDES:
+        if f'function {name}(' in payload:
+            raise SystemExit(f'Redeclaracao ES module ainda presente: {name}')
     if "replace(/\\\n/g,'<br>')" in payload:
         raise SystemExit('Regex inválido da Beta 2 ainda presente após saneamento')
     return payload
