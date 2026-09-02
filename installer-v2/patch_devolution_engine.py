@@ -4,11 +4,14 @@ from pathlib import Path
 
 MARKER_V1 = 'CSM_DEVOLUTION_ENGINE_V1'
 MARKER_V2 = 'CSM_DEVOLUTION_ENGINE_V2'
+MARKER_V3 = 'CSM_DEVOLUTION_ENGINE_V3'
 BASE = Path(__file__).resolve().parent
 SNIPPET_V1 = BASE / 'devolution_engine_snippet.js'
 STYLE_V1 = BASE / 'devolution_engine.css'
 SNIPPET_V2 = BASE / 'devolution_engine_v2_patch.js'
 STYLE_V2 = BASE / 'devolution_engine_v2.css'
+SNIPPET_V3 = BASE / 'devolution_engine_v3_patch.js'
+STYLE_V3 = BASE / 'devolution_engine_v3.css'
 
 # Funcoes que ja existem na V1. Em app.js carregado como ES module, declarar
 # novamente o mesmo identificador pode impedir o modulo inteiro de carregar.
@@ -67,7 +70,7 @@ def main() -> int:
     css = web / 'refinement.css'
     if not app.is_file() or not css.is_file():
         raise SystemExit(f'Arquivos web não encontrados em {web}')
-    required = [SNIPPET_V1, STYLE_V1, SNIPPET_V2, STYLE_V2]
+    required = [SNIPPET_V1, STYLE_V1, SNIPPET_V2, STYLE_V2, SNIPPET_V3, STYLE_V3]
     missing = [str(p) for p in required if not p.is_file()]
     if missing:
         raise SystemExit('Arquivos-fonte do Motor de Devolução ausentes: ' + ', '.join(missing))
@@ -76,9 +79,11 @@ def main() -> int:
     append_marker(css, STYLE_V1.read_text(encoding='utf-8'), MARKER_V1, 'refinement.css')
     append_marker(app, sanitize_v2(SNIPPET_V2.read_text(encoding='utf-8')), MARKER_V2, 'app.js')
     append_marker(css, STYLE_V2.read_text(encoding='utf-8'), MARKER_V2, 'refinement.css')
+    append_marker(app, SNIPPET_V3.read_text(encoding='utf-8'), MARKER_V3, 'app.js')
+    append_marker(css, STYLE_V3.read_text(encoding='utf-8'), MARKER_V3, 'refinement.css')
 
     final = app.read_text(encoding='utf-8')
-    if MARKER_V1 not in final or MARKER_V2 not in final:
+    if any(marker not in final for marker in (MARKER_V1, MARKER_V2, MARKER_V3)):
         raise SystemExit('Motor Fiscal incompleto no app.js final')
     return 0
 
