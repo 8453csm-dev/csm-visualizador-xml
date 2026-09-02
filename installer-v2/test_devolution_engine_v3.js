@@ -3,7 +3,7 @@ const path=require('path');
 const snippet=fs.readFileSync(path.join(__dirname,'devolution_engine_snippet.js'),'utf8');
 const v3=fs.readFileSync(path.join(__dirname,'devolution_engine_v3_patch.js'),'utf8');
 const harness=`
-const esc=v=>String(v??''); const $=id=>null; const state={documents:new Map()}; const activeDoc=()=>null; const els={printRoot:{innerHTML:''}}; const toast=()=>{}; const clearPrintPages=()=>{};
+const esc=v=>String(v??''); const $=id=>({}); const state={documents:new Map()}; const activeDoc=()=>null; const els={printRoot:{innerHTML:''}}; const toast=()=>{}; const clearPrintPages=()=>{};
 global.localStorage={getItem(){return null},setItem(){}}; global.document={querySelector(){return null},querySelectorAll(){return []}}; global.window={CSM_DEVOLUTION_ENGINE:{}}; global.Node={TEXT_NODE:3};
 ${snippet}
 function csmDevUpgradeDraftV2(d){return d}
