@@ -54,6 +54,13 @@ def main() -> int:
         raise SystemExit(f'app.js não encontrado em {web}')
     patch_app(app)
     csm.mkdir(parents=True, exist_ok=True)
+    payload_root = web.parent.parent
+    version_file = payload_root / 'VERSION.txt'
+    version_file.write_text(
+        f'CSM Visualizador XML {APP_VERSION}\nMotor Fiscal de Devolução 1.2.0\nInstalador completo\n',
+        encoding='utf-8',
+        newline='\n',
+    )
     info = {
         'product': 'CSM Visualizador XML',
         'version': APP_VERSION,
@@ -66,7 +73,9 @@ def main() -> int:
     final = app.read_text(encoding='utf-8')
     if MARKER not in final or APP_VERSION not in final:
         raise SystemExit('Falha ao validar identidade 3.8.0 no app.js')
-    print('build-info.json criado e versão final validada')
+    if APP_VERSION not in version_file.read_text(encoding='utf-8'):
+        raise SystemExit('VERSION.txt não foi atualizado para 3.8.0')
+    print('build-info.json e VERSION.txt criados; versão final 3.8.0 validada')
     return 0
 
 
