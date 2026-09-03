@@ -40,20 +40,10 @@ new_self='''    if len(os.Args) > 1 && os.Args[1] == "--csm-launcher-selftest" {
 if old_self not in s: raise SystemExit('selftest esperado não encontrado')
 s=s.replace(old_self,new_self,1)
 
-old_routes='''    mux.HandleFunc("/open", b.handleOpen)
-    mux.HandleFunc("/activate", b.handleActivate)
-    mux.HandleFunc("/ack", b.handleAck)
-    mux.HandleFunc("/events", b.handleEvents)
-    mux.HandleFunc("/health", b.handleHealth)'''
-new_routes='''    mux.HandleFunc("/open", b.handleOpen)
-    mux.HandleFunc("/activate", b.handleActivate)
-    mux.HandleFunc("/ack", b.handleAck)
-    mux.HandleFunc("/events", b.handleEvents)
-    mux.HandleFunc("/health", b.handleHealth)
-    mux.HandleFunc("/pick-folder", b.handlePickFolder)
-    mux.HandleFunc("/list-folder", b.handleListFolder)'''
-if old_routes not in s: raise SystemExit('rotas do broker esperadas não encontradas')
-s=s.replace(old_routes,new_routes,1)
+route_anchor='''    mux.HandleFunc("/health", b.handleHealth)'''
+if 'mux.HandleFunc("/pick-folder", b.handlePickFolder)' not in s:
+    if route_anchor not in s: raise SystemExit('âncora /health do broker não encontrada')
+    s=s.replace(route_anchor,route_anchor+'\n    mux.HandleFunc("/pick-folder", b.handlePickFolder)\n    mux.HandleFunc("/list-folder", b.handleListFolder)',1)
 
 old_final='''    if owner, ok := waitRecoverAnyCoreWindow(15 * time.Second); ok { b.setCoreState(owner, time.Time{}) }'''
 new_final='''    if owner, ok := waitFindVisibleCoreWindow(15 * time.Second); ok {
@@ -71,8 +61,9 @@ required=(
     'folderPickerAPIsAvailable()',
     'mux.HandleFunc("/pick-folder", b.handlePickFolder)',
     'mux.HandleFunc("/list-folder", b.handleListFolder)',
+    'mux.HandleFunc("/lookup-automation", b.handleLookupAutomation)',
     'maximizeStartupWindow(owner)',
 )
 for token in required:
     if token not in final: raise SystemExit('launcher 3.9.5 incompleto: '+token)
-print('Launcher 3.9.5: janela visível, seletor separado e startup maximizado.')
+print('Launcher 3.9.5: Consulta DANFE preservada, seletor separado e startup maximizado.')
