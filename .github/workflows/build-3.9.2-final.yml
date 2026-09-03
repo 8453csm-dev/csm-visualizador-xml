@@ -111,6 +111,7 @@ jobs:
           & $iscc "installer-v2/CSMVisualizadorXML.iss";if($LASTEXITCODE -ne 0){throw "Compilacao falhou"}
           $base="dist/CSMVisualizadorXML-3.9.2-Instalador-Completo.exe";if(!(Test-Path $base)){throw "EXE nao gerado"}
           Copy-Item $base "dist/CSM Visualizador XML 3.9.2 - Instalador Completo.exe" -Force
+          Copy-Item $base "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe" -Force
 
       - name: Homologar instalacao limpa
         shell: pwsh
