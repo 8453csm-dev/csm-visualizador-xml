@@ -13,19 +13,47 @@ permissions:
 
 jobs:
   diagnostico:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Extrair fontes do modulo
+        shell: pwsh
         run: |
-          mkdir -p temp/tax-src
+          New-Item -ItemType Directory -Force -Path temp/tax-src | Out-Null
           python installer-v2/patch_tax_explainer.py --extract temp/tax-src
           node --check temp/tax-src/tax_engine_core.js
           node --check temp/tax-src/tax_explainer_ui.js
-          grep -nE "MutationObserver|while\s*\(|for\s*\(;;|setInterval|requestAnimationFrame|innerHTML|get_xml_text|querySelectorAll" temp/tax-src/tax_explainer_ui.js > temp/tax-src/suspicious.txt || true
-      - name: Publicar fontes para diagnostico
+          Select-String -Path temp/tax-src/tax_explainer_ui.js -Pattern "MutationObserver|innerHTML|get_xml_text|querySelectorAll|view-tabs|content-panel" | Out-File temp/tax-src/suspicious.txt -Encoding utf8
+      - name: Baixar base estavel 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+      - name: Montar frontend real e mapear Documento Itens
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "temp/payload"
+          python installer-v2/patch_runtime.py "temp/payload/_internal/web"
+          python installer-v2/patch_lookup_order.py
+          python installer-v2/patch_devolution_engine.py "temp/payload/_internal/web"
+          python installer-v2/patch_tax_explainer.py "temp/payload/_internal/web"
+          $app="temp/payload/_internal/web/app.js"
+          $html="temp/payload/_internal/web/index.html"
+          Select-String -Path $app -Pattern "Documento|Itens|view-tab|view-tabs|content-panel|switchView|fiscalView|pdfView|itemsView" -Context 2,2 | Out-File temp/ui-structure.txt -Encoding utf8
+          if(Test-Path $html){ Select-String -Path $html -Pattern "Documento|Itens|view-tab|view-tabs|content-panel|switchView|fiscalView|pdfView|itemsView" -Context 2,2 | Out-File temp/html-structure.txt -Encoding utf8; Copy-Item $html temp/index-final.html }
+          Copy-Item $app temp/app-final.js
+      - name: Publicar fontes e estrutura real
         uses: actions/upload-artifact@v4
         with:
           name: tax-src-391
-          path: temp/tax-src
+          path: |
+            temp/tax-src
+            temp/ui-structure.txt
+            temp/html-structure.txt
+            temp/app-final.js
+            temp/index-final.html
           retention-days: 1
