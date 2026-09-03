@@ -18,7 +18,10 @@ async function csmListFolderNative(path){
  if(!resp.ok||!data?.ok)return {ok:false,error:data?.error||'Não foi possível analisar a pasta selecionada.'};
  return data
 }
-function csmFolderImportBusy(on){document.body.classList.toggle('csm-folder-import-busy',!!on)}
+function csmFolderImportBusy(on){
+ document.body.classList.toggle('csm-folder-import-busy',!!on);
+ if(on&&document.activeElement&&typeof document.activeElement.blur==='function')document.activeElement.blur()
+}
 async function openFolder(){
  await waitApi();
  if(els.folderBtn)els.folderBtn.disabled=true;if(els.welcomeFolderBtn)els.welcomeFolderBtn.disabled=true;
@@ -52,16 +55,18 @@ async function openFolder(){
 
 CSS=r'''
 
-/* CSM_FOLDER_IMPORT_PROGRESS_V3 — modal central e bloqueio durante a importação */
-.csm-folder-import-progress{inset:0!important;right:auto!important;bottom:auto!important;width:auto!important;height:auto!important;padding:20px!important;border:0!important;border-radius:0!important;background:rgba(4,12,22,.62)!important;backdrop-filter:blur(3px);display:flex!important;align-items:center;justify-content:center;box-shadow:none!important;transform:none!important;pointer-events:none;}
-.csm-folder-import-progress.show{opacity:1!important;transform:none!important;pointer-events:auto;}
-.csm-folder-import-progress.done,.csm-folder-import-progress.error{pointer-events:none;}
-.csm-folder-import-card{width:min(455px,calc(100vw - 36px));padding:22px 23px 19px;border:1px solid #31577f;border-radius:18px;background:#0d2035;box-shadow:0 24px 68px rgba(0,0,0,.48);color:#eef6ff;}
+/* CSM_FOLDER_IMPORT_PROGRESS_V3 — overlay fullscreen real, modal central e bloqueio durante a importação */
+.csm-folder-import-progress{position:fixed!important;inset:0!important;width:auto!important;height:auto!important;margin:0!important;padding:20px!important;box-sizing:border-box!important;z-index:2147483647!important;border:0!important;border-radius:0!important;background:rgba(4,12,22,.46)!important;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;box-shadow:none!important;transform:none!important;pointer-events:none!important;}
+.csm-folder-import-progress.show{opacity:1!important;transform:none!important;pointer-events:auto!important;}
+.csm-folder-import-progress.done,.csm-folder-import-progress.error{pointer-events:none!important;}
+.csm-folder-import-card{position:relative;flex:0 0 auto;width:min(455px,calc(100vw - 40px));max-width:455px;max-height:calc(100vh - 40px);overflow:auto;padding:22px 23px 19px;box-sizing:border-box;border:1px solid #31577f;border-radius:18px;background:#0d2035;box-shadow:0 24px 68px rgba(0,0,0,.38);color:#eef6ff;}
 .csm-folder-import-card .csm-folder-import-head strong{font-size:15px}.csm-folder-import-card .csm-folder-import-status{font-size:12px;margin-top:5px}.csm-folder-import-card .csm-folder-import-foot{font-size:10px;margin-top:10px}.csm-folder-import-card .csm-folder-import-bar{height:5px;margin-top:15px}
 body.csm-folder-import-busy{overflow:hidden!important;}
-body.light .csm-folder-import-progress{background:rgba(28,47,67,.28)!important;}
-body.light .csm-folder-import-card{background:#f9fcff;border-color:#b9d2e9;color:#173554;box-shadow:0 24px 60px rgba(31,66,102,.24)}
-@media(max-width:640px){.csm-folder-import-progress{inset:0!important;width:auto!important;right:auto!important;bottom:auto!important;padding:12px!important}.csm-folder-import-card{width:100%;}}
+body.csm-folder-import-busy>*:not(#csmFolderImportProgress){pointer-events:none!important;user-select:none!important;}
+body.csm-folder-import-busy #csmFolderImportProgress{pointer-events:auto!important;}
+body.light .csm-folder-import-progress{background:rgba(28,47,67,.24)!important;}
+body.light .csm-folder-import-card{background:#f9fcff;border-color:#b9d2e9;color:#173554;box-shadow:0 24px 60px rgba(31,66,102,.20)}
+@media(max-width:640px){.csm-folder-import-progress{position:fixed!important;inset:0!important;width:auto!important;height:auto!important;padding:12px!important}.csm-folder-import-card{width:100%;max-width:455px;max-height:calc(100vh - 24px)}}
 '''
 
 
@@ -85,8 +90,11 @@ def patch(web:Path)->None:
     text=text[:start]+NEW_OPEN+text[end:]
 
     # Bloqueia atalhos enquanto a importação está realmente em curso.
-    anchor='function csmFolderImportBusy(on){document.body.classList.toggle(\'csm-folder-import-busy\',!!on)}'
-    guard="""function csmFolderImportBusy(on){document.body.classList.toggle('csm-folder-import-busy',!!on)}
+    anchor="""function csmFolderImportBusy(on){
+ document.body.classList.toggle('csm-folder-import-busy',!!on);
+ if(on&&document.activeElement&&typeof document.activeElement.blur==='function')document.activeElement.blur()
+}"""
+    guard=anchor+"""
 document.addEventListener('keydown',e=>{if(document.body.classList.contains('csm-folder-import-busy')){e.preventDefault();e.stopImmediatePropagation()}},true);"""
     if anchor not in text:raise SystemExit('Âncora de busy não encontrada')
     text=text.replace(anchor,guard,1)
@@ -103,7 +111,7 @@ document.addEventListener('keydown',e=>{if(document.body.classList.contains('csm
     fn=final[final.find('async function openFolder(){'):final.find('\nfunction handleLoadResult',final.find('async function openFolder(){'))]
     if 'window.pywebview.api.open_folder()' in fn:raise SystemExit('open_folder antigo ainda ativo')
     if fn.find("if(picked?.cancelled||!picked?.path)return;")>fn.find("csmFolderImportShow('Preparando a pasta selecionada...')"):raise SystemExit('Overlay aparece antes da confirmação')
-    print('Progresso V3: seletor primeiro; modal central somente após confirmar a pasta.')
+    print('Progresso V3 corrigido: overlay fullscreen, modal central e bloqueio real da interface.')
 
 
 def main()->int:
