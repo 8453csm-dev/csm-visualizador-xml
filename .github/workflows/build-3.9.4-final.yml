@@ -1,6 +1,11 @@
 name: Build CSM Visualizador XML 3.9.4 Final
 
 on:
+  push:
+    branches: ["release/3.9.4"]
+    paths:
+      - "installer-v2/**"
+      - ".github/workflows/build-3.9.4-final.yml"
   workflow_dispatch:
 
 permissions:
