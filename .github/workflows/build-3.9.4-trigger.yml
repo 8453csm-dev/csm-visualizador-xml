@@ -1,0 +1,11 @@
+name: Trigger Build 3.9.4
+on:
+  push:
+    branches: ["release/3.9.4"]
+permissions:
+  contents: read
+jobs:
+  note:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Use build-3.9.4-final.yml on release/3.9.4"
