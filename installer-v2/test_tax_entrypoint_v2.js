@@ -1,0 +1,36 @@
+const fs=require('fs');
+const {JSDOM}=require('jsdom');
+const core=fs.readFileSync(process.env.CSM_TAX_CORE,'utf8');
+const ui=fs.readFileSync(process.env.CSM_TAX_UI,'utf8');
+const entry=fs.readFileSync(process.env.CSM_TAX_ENTRY,'utf8');
+
+(async()=>{
+ const html='<!doctype html><body><section class="content-panel"><div class="view-tabs"><button class="view-tab active" data-view="pdf">Documento</button><button class="view-tab" data-view="items">Itens</button><button class="view-tab advanced-view-tab" data-view="fiscal">Fiscal</button><button class="view-tab advanced-view-tab" data-view="library">Biblioteca</button><button class="view-tab advanced-view-tab" data-view="xml">XML</button></div><div id="pdfView" class="view active"></div><div id="itemsView" class="view"></div><div id="fiscalView" class="view"></div></section><div id="printRoot"></div></body>';
+ const dom=new JSDOM(html,{runScripts:'outside-only',pretendToBeVisual:true});
+ const w=dom.window;
+ let active=null;
+ let xmlReads=0;
+ w.state={activeId:null,activeView:'pdf'};
+ w.activeDoc=()=>active;
+ w.esc=x=>String(x??'');w.toast=()=>{};w.clearPrintPages=()=>{};w.els={printRoot:w.document.getElementById('printRoot')};w.navigator.clipboard={writeText:async()=>{}};w.print=()=>{};
+ w.switchView=async v=>{w.state.activeView=v;w.document.querySelectorAll('.view-tab').forEach(b=>b.classList.toggle('active',b.dataset.view===v));w.document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id===v+'View'))};
+ w.pywebview={api:{get_xml_text:async()=>{xmlReads++;return {ok:true,xml:fs.readFileSync(__dirname+'/tax_test_fixture.xml','utf8')}}}};
+ w.activateDocument=async id=>{w.state.activeId=id;active={document_id:id,doc_type:'nfe',model:'55'}};
+ w.showWelcome=()=>{active=null;w.state.activeId=null};
+ w.eval(core);w.eval(ui);w.eval(entry);
+ await new Promise(r=>w.setTimeout(r,20));
+ const btn=w.document.querySelector('[data-view="taxexplain"]');
+ if(!btn)throw new Error('Aba tributaria nao foi montada na estrutura real Documento/Itens');
+ if(!btn.classList.contains('hidden'))throw new Error('Aba deveria iniciar oculta sem documento');
+ await w.activateDocument('doc1');
+ await new Promise(r=>w.setTimeout(r,20));
+ if(btn.classList.contains('hidden'))throw new Error('Aba permaneceu oculta apos activateDocument programatico');
+ btn.click();
+ await new Promise(r=>w.setTimeout(r,80));
+ if(xmlReads!==1)throw new Error('Clique tributario deveria ler XML uma vez; leituras='+xmlReads);
+ if(!w.document.getElementById('taxexplainView').textContent.includes('Entender a Tributação'))throw new Error('Analise tributaria nao renderizou');
+ w.showWelcome();await new Promise(r=>w.setTimeout(r,10));
+ if(!btn.classList.contains('hidden'))throw new Error('Aba nao ocultou ao voltar para tela inicial');
+ dom.window.close();
+ console.log('OK - estrutura real Documento/Itens, abertura programatica e sem loop.');
+})().catch(e=>{console.error(e);process.exit(1)});
