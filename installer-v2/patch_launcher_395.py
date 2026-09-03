@@ -18,8 +18,10 @@ new_primary='''func primaryWindow(pid uint32) (windowCandidate, bool) {
     for _, w := range wins { if w.visible { return w, true } }
     return windowCandidate{}, false
 }'''
-if old_primary not in s: raise SystemExit('primaryWindow esperado não encontrado')
-s=s.replace(old_primary,new_primary,1)
+if old_primary in s:
+    s=s.replace(old_primary,new_primary,1)
+elif 'w.visible && strings.Contains(strings.ToLower(w.title), "csm visualizador xml")' not in s:
+    raise SystemExit('primaryWindow visível/protegido não encontrado')
 
 old_gor='''    go func() {
         if owner, ok := waitRecoverAnyCoreWindow(15 * time.Second); ok { b.setCoreState(owner, time.Time{}) }
