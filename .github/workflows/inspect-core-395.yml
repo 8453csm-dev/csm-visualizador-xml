@@ -26,16 +26,42 @@ jobs:
           New-Item -ItemType Directory -Force -Path temp | Out-Null
           gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
           python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "temp/payload"
-      - name: Listar arquivo PyInstaller e procurar API
+      - name: Extrair e desassemblar main
         shell: pwsh
         run: |
-          $exe=(Resolve-Path "temp/payload/CSM Visualizador XML.exe").Path
-          pyi-archive_viewer -l $exe | Out-File -Encoding utf8 temp/archive.txt
-          Get-Content temp/archive.txt | Select-String -Pattern 'app|src|main|api|window|folder' -CaseSensitive:$false | Out-File -Encoding utf8 temp/relevant.txt
-          Get-Content temp/relevant.txt
+          @'
+          import dis, io, marshal, types
+          from pathlib import Path
+          from PyInstaller.archive.readers import CArchiveReader
+          exe=Path(r"temp/payload/CSM Visualizador XML.exe")
+          arch=CArchiveReader(str(exe))
+          data=arch.extract('main')
+          code=None
+          for off in (0,16,12,8):
+              try:
+                  obj=marshal.loads(data[off:])
+                  if isinstance(obj, types.CodeType): code=obj; break
+              except Exception: pass
+          if code is None: raise SystemExit('Nao consegui carregar code object main')
+          def walk(c, path='main'):
+              here=f"{path}/{c.co_name}"
+              interesting=('folder','open','dialog','api','window','recent','file')
+              if any(x in c.co_name.lower() for x in interesting) or any(isinstance(k,str) and any(x in k.lower() for x in interesting) for k in c.co_consts):
+                  print('\n###',here,'###')
+                  print('args=',c.co_varnames[:c.co_argcount])
+                  print('names=',c.co_names)
+                  print('strings=',[k for k in c.co_consts if isinstance(k,str)])
+                  dis.dis(c)
+              for k in c.co_consts:
+                  if isinstance(k,types.CodeType): walk(k,here)
+          buf=io.StringIO()
+          import contextlib
+          with contextlib.redirect_stdout(buf): walk(code)
+          Path('temp/disassembly.txt').write_text(buf.getvalue(),encoding='utf-8')
+          print(buf.getvalue()[:60000])
+          '@ | Set-Content -Encoding utf8 temp/inspect.py
+          python temp/inspect.py
       - uses: actions/upload-artifact@v4
         with:
           name: inspect-core-395
-          path: |
-            temp/archive.txt
-            temp/relevant.txt
+          path: temp/disassembly.txt
