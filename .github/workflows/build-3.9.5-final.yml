@@ -1,0 +1,194 @@
+name: Build CSM Visualizador XML 3.9.5 Final
+
+on:
+  push:
+    branches: ["release/3.9.5"]
+    paths:
+      - "installer-v2/**"
+      - ".github/workflows/build-3.9.5-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
+      - name: Baixar base estavel 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+          if($LASTEXITCODE -ne 0){throw "Falha ao baixar base 3.7.8"}
+
+      - name: Montar payload completo 3.9.5
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "installer-v2/payload"
+          if($LASTEXITCODE -ne 0){throw "Falha ao extrair base"}
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Runtime falhou"}
+          python installer-v2/patch_lookup_order.py
+          if($LASTEXITCODE -ne 0){throw "Lookup falhou"}
+          python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Devolução falhou"}
+          python installer-v2/patch_tax_explainer.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Tributação falhou"}
+          python installer-v2/patch_tax_explainer_entrypoint_v2.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Entrada tributária falhou"}
+          python installer-v2/patch_folder_import_progress.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Progresso V1 falhou"}
+          python installer-v2/patch_folder_import_progress_v2.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Progresso V2 falhou"}
+          python installer-v2/patch_folder_import_progress_v3.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Progresso V3 falhou"}
+          python installer-v2/patch_release_identity_395.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          if($LASTEXITCODE -ne 0){throw "Identidade 3.9.5 falhou"}
+          python installer-v2/patch_tax_explainer.py --extract temp/taxsrc
+          if($LASTEXITCODE -ne 0){throw "Extração de teste fiscal falhou"}
+          Copy-Item installer-v2/tax_explainer_entrypoint_v2.js temp/taxsrc/tax_explainer_entrypoint_v2.js -Force
+          $app=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          $css=(Resolve-Path "installer-v2/payload/_internal/web/refinement.css").Path
+          $env:CSM_APP_JS=$app;$env:CSM_CSS=$css
+          node installer-v2/test_folder_import_progress_v3.js
+          if($LASTEXITCODE -ne 0){throw "Regressão do modal de pasta"}
+          Copy-Item $app temp/app-395.mjs -Force
+          node --check temp/app-395.mjs
+          if($LASTEXITCODE -ne 0){throw "app.js final inválido"}
+          $bi=Get-Content "installer-v2/payload/_internal/csm/build-info.json" -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.9.5' -or !$bi.folder_progress_after_picker -or !$bi.folder_progress_blocking_modal -or !$bi.startup_maximized){throw "Build-info 3.9.5 incorreto"}
+
+      - name: Testar Devolucao e Entender a Tributacao
+        shell: pwsh
+        run: |
+          npm install --no-save jsdom@26.1.0
+          if($LASTEXITCODE -ne 0){throw "jsdom não instalou"}
+          node installer-v2/test_devolution_engine.js
+          if($LASTEXITCODE -ne 0){throw "Devolução base regrediu"}
+          node installer-v2/test_devolution_engine_v3.js
+          if($LASTEXITCODE -ne 0){throw "Devolução ICMS-ST/PDF regrediu"}
+          node installer-v2/test_devolution_entrypoint_v4.js
+          if($LASTEXITCODE -ne 0){throw "Entrada da Devolução regrediu"}
+          $env:CSM_TAX_CORE=(Resolve-Path temp/taxsrc/tax_engine_core.js).Path
+          $env:CSM_TAX_UI=(Resolve-Path temp/taxsrc/tax_explainer_ui.js).Path
+          $env:CSM_TAX_ENTRY=(Resolve-Path temp/taxsrc/tax_explainer_entrypoint_v2.js).Path
+          node installer-v2/test_tax_engine.js
+          if($LASTEXITCODE -ne 0){throw "Motor tributário falhou"}
+          node installer-v2/test_tax_ui.js
+          if($LASTEXITCODE -ne 0){throw "UI tributária falhou"}
+          node installer-v2/test_tax_no_freeze.js
+          if($LASTEXITCODE -ne 0){throw "No-freeze tributário falhou"}
+          node installer-v2/test_tax_entrypoint_v2.js
+          if($LASTEXITCODE -ne 0){throw "Entrada tributária falhou"}
+
+      - name: Preparar launcher seletor nativo e Consulta DANFE
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          if($LASTEXITCODE -ne 0){throw "Instância única falhou"}
+          python installer-v2/patch_launcher_lookup.py
+          if($LASTEXITCODE -ne 0){throw "Lookup launcher falhou"}
+          python installer-v2/patch_launcher_395.py
+          if($LASTEXITCODE -ne 0){throw "Launcher 3.9.5 falhou"}
+          Get-ChildItem installer-v2/launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
+          $main=Get-Content installer-v2/launcher/main.go -Raw
+          $picker=Get-Content installer-v2/launcher/folder_picker_windows.go -Raw
+          foreach($token in @('/pick-folder','/list-folder','maximizeStartupWindow(owner)','waitFindVisibleCoreWindow','folderPickerAPIsAvailable')){if(!$main.Contains($token) -and !$picker.Contains($token)){throw "Launcher sem $token"}}
+          if(!$picker.Contains('folderMaxFiles      = 5000')){throw "Limite de 5000 ausente no seletor"}
+          New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
+          $fx=Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319";$csc=Join-Path $fx "csc.exe"
+          $source=(Resolve-Path "installer-v2/launcher/consulta_danfe_helper.cs").Path;$helper=(Join-Path (Resolve-Path "installer-v2/payload/_internal/csm").Path "CSM Consulta DANFE Helper.exe")
+          & $csc /nologo /target:winexe /optimize+ /platform:x64 "/out:$helper" "/reference:$(Join-Path $fx 'WPF\UIAutomationClient.dll')" "/reference:$(Join-Path $fx 'WPF\UIAutomationTypes.dll')" "/reference:$(Join-Path $fx 'System.Windows.Forms.dll')" $source
+          if($LASTEXITCODE -ne 0 -or !(Test-Path $helper)){throw "Helper não compilou"}
+          $original="installer-v2/payload/CSM Visualizador XML.exe";$core="installer-v2/payload/CSM Visualizador XML Core.exe";$icon=(Resolve-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico").Path
+          Move-Item -Force $original $core
+          go install github.com/akavel/rsrc@v0.10.2
+          if($LASTEXITCODE -ne 0){throw "rsrc não instalou"}
+          $rsrc=Join-Path (go env GOPATH) "bin\rsrc.exe";& $rsrc -arch amd64 -ico $icon -o "installer-v2/launcher/rsrc_windows_amd64.syso"
+          if($LASTEXITCODE -ne 0){throw "Ícone launcher falhou"}
+          $env:GOOS='windows';$env:GOARCH='amd64';$env:CGO_ENABLED='0';$env:GO111MODULE='off'
+          Push-Location installer-v2/launcher
+          try{go build -trimpath -ldflags="-H windowsgui -s -w" -o "..\payload\CSM Visualizador XML.exe" .;if($LASTEXITCODE -ne 0){throw "Launcher não compilou"}}finally{Pop-Location}
+          $self=Start-Process "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Self-test launcher/picker falhou: $($self.ExitCode)"}
+
+      - name: Preparar e compilar instalador 3.9.5
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          if($LASTEXITCODE -ne 0){throw "Pillow não instalou"}
+          python installer-v2/make_brand.py
+          if($LASTEXITCODE -ne 0){throw "Brand falhou"}
+          python installer-v2/prepare_release_395.py
+          if($LASTEXITCODE -ne 0){throw "ISS 3.9.5 falhou"}
+          $path="installer-v2/CSMVisualizadorXML.iss";$text=Get-Content $path -Raw;$text=[regex]::Replace($text,'(?m)^UninstallDisplayVersion=.*\r?\n','');[IO.File]::WriteAllText((Resolve-Path $path),$text,[Text.UTF8Encoding]::new($false))
+          $iscc="C:\Program Files (x86)\Inno Setup 6\ISCC.exe";if(!(Test-Path $iscc)){choco install innosetup -y --no-progress}
+          if(!(Test-Path $iscc)){throw "Inno Setup ausente"}
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $iscc "installer-v2/CSMVisualizadorXML.iss"
+          if($LASTEXITCODE -ne 0){throw "Compilação falhou"}
+          $base="dist/CSMVisualizadorXML-3.9.5-Instalador-Completo.exe";if(!(Test-Path $base)){throw "EXE não gerado"}
+          Copy-Item $base "dist/CSM Visualizador XML 3.9.5 - Instalador Completo.exe" -Force
+          Copy-Item $base "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe" -Force
+
+      - name: Homologar instalacao limpa e recursos 3.9.5
+        shell: pwsh
+        run: |
+          $installer=(Resolve-Path "dist/CSM Visualizador XML 3.9.5 - Instalador Completo.exe").Path;$dir=Join-Path $env:TEMP "CSM-395-Maquina-Limpa";Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+          $p=Start-Process $installer -ArgumentList ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="'+$dir+'"') -Wait -PassThru;if($p.ExitCode -ne 0){throw "Instalação limpa falhou"}
+          $info=Join-Path $dir "_internal\csm\build-info.json";$app=Join-Path $dir "_internal\web\app.js";$css=Join-Path $dir "_internal\web\refinement.css";$launcher=Join-Path $dir "CSM Visualizador XML.exe"
+          if(!(Test-Path $info)-or!(Test-Path $app)-or!(Test-Path $css)-or!(Test-Path $launcher)){throw "Payload instalado incompleto"}
+          $bi=Get-Content $info -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.9.5' -or !$bi.folder_progress_after_picker -or !$bi.folder_progress_blocking_modal -or !$bi.folder_picker_native_broker -or !$bi.startup_maximized){throw "Máquina limpa recebeu pacote errado"}
+          $env:CSM_APP_JS=$app;$env:CSM_CSS=$css;node installer-v2/test_folder_import_progress_v3.js
+          if($LASTEXITCODE -ne 0){throw "Modal instalado falhou"}
+          $self=Start-Process $launcher -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Launcher instalado falhou self-test"}
+          $un=Join-Path $dir 'unins000.exe';if(Test-Path $un){Start-Process $un -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait}
+
+      - name: Homologar limpeza associacao abas e desinstalacao
+        shell: pwsh
+        run: |
+          $src=Get-Content "installer-v2/test_clean_association.ps1" -Raw -Encoding UTF8
+          foreach($v in @('3.8.0','3.8.1','3.9.0','3.9.1','3.9.2','3.9.3','3.9.4')){$src=$src.Replace($v,'3.9.5')}
+          $script=Join-Path (Resolve-Path temp) 'test_clean_395.ps1';[IO.File]::WriteAllText($script,$src,[Text.UTF8Encoding]::new($false)); & $script
+          if($LASTEXITCODE -ne 0){throw "Limpeza/associação falhou"}
+          ./installer-v2/test_installed.ps1
+          if($LASTEXITCODE -ne 0){throw "Teste instalado/abas falhou"}
+
+      - name: Validacao final dos modulos
+        shell: pwsh
+        run: |
+          $env:CSM_TAX_CORE=(Resolve-Path temp/taxsrc/tax_engine_core.js).Path;$env:CSM_TAX_UI=(Resolve-Path temp/taxsrc/tax_explainer_ui.js).Path;$env:CSM_TAX_ENTRY=(Resolve-Path temp/taxsrc/tax_explainer_entrypoint_v2.js).Path
+          node installer-v2/test_tax_entrypoint_v2.js;if($LASTEXITCODE -ne 0){throw "Tributação final falhou"}
+          node installer-v2/test_tax_no_freeze.js;if($LASTEXITCODE -ne 0){throw "No-freeze final falhou"}
+          node installer-v2/test_devolution_entrypoint_v4.js;if($LASTEXITCODE -ne 0){throw "Devolução final falhou"}
+          $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path;$env:CSM_CSS=(Resolve-Path "installer-v2/payload/_internal/web/refinement.css").Path
+          node installer-v2/test_folder_import_progress_v3.js;if($LASTEXITCODE -ne 0){throw "Modal final falhou"}
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $exe="dist/CSM Visualizador XML 3.9.5 - Instalador Completo.exe";$sha=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLower();"$sha  CSM Visualizador XML 3.9.5 - Instalador Completo.exe" | Set-Content -Encoding ascii "dist/CSM Visualizador XML 3.9.5 - SHA256.txt";Write-Host "SHA256=$sha"
+
+      - name: Publicar instalador homologado
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-3.9.5-Instalador-Final
+          path: |
+            dist/CSM Visualizador XML 3.9.5 - Instalador Completo.exe
+            dist/CSM Visualizador XML 3.9.5 - SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
