@@ -12,6 +12,7 @@ import (
     "sort"
     "strings"
     "syscall"
+    "time"
     "unsafe"
 )
 
@@ -35,14 +36,14 @@ var (
 )
 
 type browseInfoW struct {
-    hwndOwner      uintptr
-    pidlRoot       uintptr
-    pszDisplayName *uint16
-    lpszTitle      *uint16
-    ulFlags        uint32
-    lpfn           uintptr
-    lParam         uintptr
-    iImage         int32
+    hwndOwner       uintptr
+    pidlRoot        uintptr
+    pszDisplayName  *uint16
+    lpszTitle       *uint16
+    ulFlags         uint32
+    lpfn            uintptr
+    lParam          uintptr
+    iImage          int32
 }
 
 type folderPathRequest struct {
