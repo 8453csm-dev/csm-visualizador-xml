@@ -106,3 +106,7 @@ $u = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMS
 if ($u.ExitCode -ne 0) { throw "Desinstalação de homologação falhou: $($u.ExitCode)" }
 Start-Sleep -Milliseconds 800
 if (Test-Path $main) { throw "Executável permaneceu após desinstalação" }
+
+# Normaliza o código de saída do script. Cmdlets/registries podem deixar um
+# $LASTEXITCODE antigo mesmo com todas as validações acima aprovadas.
+exit 0
