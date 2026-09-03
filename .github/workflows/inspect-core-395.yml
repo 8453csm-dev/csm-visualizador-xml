@@ -26,42 +26,45 @@ jobs:
           New-Item -ItemType Directory -Force -Path temp | Out-Null
           gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
           python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "temp/payload"
-      - name: Extrair e desassemblar main
+      - name: Extrair PYZ e inspecionar modulos fiscais/app
         shell: pwsh
         run: |
           @'
-          import dis, io, marshal, types
+          import dis, io, marshal, types, tempfile
           from pathlib import Path
-          from PyInstaller.archive.readers import CArchiveReader
+          from PyInstaller.archive.readers import CArchiveReader, ZlibArchiveReader
           exe=Path(r"temp/payload/CSM Visualizador XML.exe")
           arch=CArchiveReader(str(exe))
-          data=arch.extract('main')
-          code=None
-          for off in (0,16,12,8):
-              try:
-                  obj=marshal.loads(data[off:])
-                  if isinstance(obj, types.CodeType): code=obj; break
-              except Exception: pass
-          if code is None: raise SystemExit('Nao consegui carregar code object main')
-          def walk(c, path='main'):
-              here=f"{path}/{c.co_name}"
-              interesting=('folder','open','dialog','api','window','recent','file')
-              if any(x in c.co_name.lower() for x in interesting) or any(isinstance(k,str) and any(x in k.lower() for x in interesting) for k in c.co_consts):
-                  print('\n###',here,'###')
-                  print('args=',c.co_varnames[:c.co_argcount])
-                  print('names=',c.co_names)
-                  print('strings=',[k for k in c.co_consts if isinstance(k,str)])
-                  dis.dis(c)
+          print('CARCHIVE:', list(arch.toc.keys()))
+          pyz_name=next((n for n in arch.toc if 'PYZ' in n.upper()),None)
+          if not pyz_name: raise SystemExit('PYZ nao encontrado')
+          pyz_data=arch.extract(pyz_name)
+          pyz_path=Path('temp/app.pyz');pyz_path.write_bytes(pyz_data)
+          pyz=ZlibArchiveReader(str(pyz_path))
+          names=list(pyz.toc.keys())
+          candidates=[n for n in names if any(k in n.lower() for k in ('src.app','src','app','parser','document'))]
+          print('CANDIDATES:', candidates)
+          out=[]
+          def walk(c,path):
+              if c.co_name in {'open_folder','open_dropped_paths','open_recent','open_files','_load_paths','_load_file','load_paths'} or any(x in c.co_name.lower() for x in ('folder','dropped_paths')):
+                  b=io.StringIO();
+                  import contextlib
+                  with contextlib.redirect_stdout(b):
+                      print('\n###',path+'/'+c.co_name,'###');print('args=',c.co_varnames[:c.co_argcount]);print('names=',c.co_names);print('strings=',[x for x in c.co_consts if isinstance(x,str)]);dis.dis(c)
+                  out.append(b.getvalue())
               for k in c.co_consts:
-                  if isinstance(k,types.CodeType): walk(k,here)
-          buf=io.StringIO()
-          import contextlib
-          with contextlib.redirect_stdout(buf): walk(code)
-          Path('temp/disassembly.txt').write_text(buf.getvalue(),encoding='utf-8')
-          print(buf.getvalue()[:60000])
+                  if isinstance(k,types.CodeType):walk(k,path+'/'+c.co_name)
+          for name in candidates:
+              try:
+                  obj=pyz.extract(name)
+                  if isinstance(obj,types.CodeType):walk(obj,name)
+              except Exception as e: print('ERR',name,e)
+          text=''.join(out)
+          Path('temp/api-disassembly.txt').write_text(text,encoding='utf-8')
+          print(text[:100000])
           '@ | Set-Content -Encoding utf8 temp/inspect.py
           python temp/inspect.py
       - uses: actions/upload-artifact@v4
         with:
           name: inspect-core-395
-          path: temp/disassembly.txt
+          path: temp/api-disassembly.txt
