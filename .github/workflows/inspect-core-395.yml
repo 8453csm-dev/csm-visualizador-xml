@@ -1,0 +1,41 @@
+name: Inspect Core 3.9.5
+
+on:
+  push:
+    branches: ["release/3.9.5"]
+    paths: [".github/workflows/inspect-core-395.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Baixar e extrair base
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m pip install pyinstaller
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "temp/payload"
+      - name: Listar arquivo PyInstaller e procurar API
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path "temp/payload/CSM Visualizador XML.exe").Path
+          pyi-archive_viewer -l $exe | Out-File -Encoding utf8 temp/archive.txt
+          Get-Content temp/archive.txt | Select-String -Pattern 'app|src|main|api|window|folder' -CaseSensitive:$false | Out-File -Encoding utf8 temp/relevant.txt
+          Get-Content temp/relevant.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inspect-core-395
+          path: |
+            temp/archive.txt
+            temp/relevant.txt
