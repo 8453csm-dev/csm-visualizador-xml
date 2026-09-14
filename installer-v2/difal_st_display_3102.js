@@ -5,7 +5,8 @@
 
   function setText(el,value){if(el && el.textContent!==value)el.textContent=value}
 
-  function cleanMainSummary(root=document){
+  function cleanMainSummary(root=globalThis.document){
+    if(!root)return;
     const view=root.querySelector?.('#difalstView');
     if(!view)return;
 
@@ -34,7 +35,8 @@
     }
   }
 
-  function cleanFiscalSummary(root=document){
+  function cleanFiscalSummary(root=globalThis.document){
+    if(!root)return;
     const panel=root.querySelector?.('#csmDifalFiscalPanel');
     if(!panel)return;
 
@@ -60,7 +62,7 @@
   let scheduled=false;
   function apply(){scheduled=false;cleanMainSummary();cleanFiscalSummary()}
   function schedule(){if(scheduled)return;scheduled=true;Promise.resolve().then(apply)}
-  const root=document.body||document.documentElement;
+  const root=globalThis.document?.body||globalThis.document?.documentElement;
   if(root){
     const obs=new MutationObserver(schedule);
     obs.observe(root,{childList:true,subtree:true,characterData:true});
