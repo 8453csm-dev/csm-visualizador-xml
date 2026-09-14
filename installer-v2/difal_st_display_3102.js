@@ -3,6 +3,8 @@
 (() => {
   'use strict';
 
+  function setText(el,value){if(el && el.textContent!==value)el.textContent=value}
+
   function cleanMainSummary(root=document){
     const view=root.querySelector?.('#difalstView');
     if(!view)return;
@@ -12,18 +14,18 @@
       const strong=sectionTitle.querySelector('strong');
       const small=sectionTitle.querySelector('small');
       const badge=sectionTitle.querySelector(':scope > span');
-      if(strong)strong.textContent='Resumo por alíquota';
-      if(small)small.textContent='Cada cálculo é apurado isoladamente; bases de operações diferentes não são misturadas.';
+      setText(strong,'Resumo por alíquota');
+      setText(small,'Cada cálculo é apurado isoladamente; bases de operações diferentes não são misturadas.');
       if(badge){
         const m=(badge.textContent||'').match(/\d+/);
-        if(m)badge.textContent=`${m[0]} cálculo(s)`;
+        if(m)setText(badge,`${m[0]} cálculo(s)`);
       }
     }
 
     view.querySelectorAll('.csm-difal-summary .csm-difal-card-title').forEach(title=>{
       const txt=(title.textContent||'').trim();
       const m=txt.match(/^CFOP\s+[^•]+\s*•\s*([0-9.,]+%)\s*•\s*(DIFAL|ICMS ST)$/i);
-      if(m)title.textContent=`Alíquota interestadual ${m[1]}`;
+      if(m)setText(title,`Alíquota interestadual ${m[1]}`);
     });
 
     const note=view.querySelector('.csm-difal-note');
@@ -37,7 +39,7 @@
     if(!panel)return;
 
     const headSmall=panel.querySelector('.csm-difal-fiscal-head small');
-    if(headSmall)headSmall.textContent='Apuração separada por alíquota interestadual';
+    setText(headSmall,'Apuração separada por alíquota interestadual');
 
     panel.querySelectorAll('.csm-difal-fiscal-row').forEach(row=>{
       const first=row.querySelector(':scope > span:first-child');
@@ -47,20 +49,22 @@
       if(!b||!small)return;
       const parts=(small.textContent||'').split('•').map(x=>x.trim()).filter(Boolean);
       const rate=parts.find(x=>/%$/.test(x));
-      if(/^CFOP\s+/i.test(b.textContent||'') && rate)b.textContent=`Alíquota interestadual ${rate}`;
-      if(parts.length){
-        const filtered=parts.filter(x=>x!==rate);
-        small.textContent=filtered.join(' • ');
+      if(/^CFOP\s+/i.test(b.textContent||'') && rate)setText(b,`Alíquota interestadual ${rate}`);
+      if(parts.length && rate){
+        const filtered=parts.filter(x=>x!==rate).join(' • ');
+        setText(small,filtered);
       }
     });
   }
 
-  function apply(){cleanMainSummary();cleanFiscalSummary()}
+  let scheduled=false;
+  function apply(){scheduled=false;cleanMainSummary();cleanFiscalSummary()}
+  function schedule(){if(scheduled)return;scheduled=true;Promise.resolve().then(apply)}
   const root=document.body||document.documentElement;
   if(root){
-    const obs=new MutationObserver(()=>apply());
-    obs.observe(root,{childList:true,subtree:true});
+    const obs=new MutationObserver(schedule);
+    obs.observe(root,{childList:true,subtree:true,characterData:true});
   }
-  Promise.resolve().then(apply);
-  globalThis.CSM_DIFAL_ST_DISPLAY_3102={apply};
+  schedule();
+  globalThis.CSM_DIFAL_ST_DISPLAY_3102={apply,schedule};
 })();
