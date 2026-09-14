@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe><infNFe versao="4.00">
+<ide><mod>55</mod><serie>1</serie><nNF>12345</nNF></ide>
+<emit><xNome>FORNECEDOR PR</xNome><enderEmit><UF>PR</UF></enderEmit></emit><dest><xNome>CLIENTE SP</xNome><enderDest><UF>SP</UF></enderDest></dest>
+<det nItem="1"><prod><cProd>A</cProd><xProd>ITEM NACIONAL 12%</xProd><NCM>11111111</NCM><CFOP>6102</CFOP><vProd>1000.00</vProd></prod><imposto><ICMS><ICMS00><orig>0</orig><CST>00</CST><vBC>1000.00</vBC><pICMS>12.00</pICMS><vICMS>120.00</vICMS></ICMS00></ICMS><IPI><IPITrib><vIPI>100.00</vIPI></IPITrib></IPI></imposto></det>
+<det nItem="2"><prod><cProd>B</cProd><xProd>ITEM IMPORTADO 4%</xProd><NCM>22222222</NCM><CFOP>6102</CFOP><vProd>500.00</vProd></prod><imposto><ICMS><ICMS00><orig>1</orig><CST>00</CST><vBC>500.00</vBC><pICMS>4.00</pICMS><vICMS>20.00</vICMS></ICMS00></ICMS><IPI><IPITrib><vIPI>50.00</vIPI></IPITrib></IPI></imposto></det>
+</infNFe></NFe></nfeProc>
