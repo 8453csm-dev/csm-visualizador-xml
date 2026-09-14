@@ -55,4 +55,17 @@ for token in ('#define AppVersion "3.10.2"','OutputBaseFilename=CSMVisualizadorX
     if token not in s:raise SystemExit('Instalador 3.10.2 incompleto: '+token)
 if 'PrivilegesRequired=admin' in s:raise SystemExit('Instalador ainda exige administrador')
 p.write_text(s,encoding='utf-8',newline='\n')
-print('ISS preparado para 3.10.2 com abertura pos-instalacao limpa e no diretorio correto.')
+
+# O teste legado usa um nome alternativo do instalador. Na 3.10.2, apontamos a homologação
+# para o EXE versionado realmente produzido pela compilação, sem criar cópias artificiais.
+test=Path('installer-v2/test_installed.ps1')
+t=test.read_text(encoding='utf-8')
+old='$installer = (Resolve-Path "dist/CSMVisualizadorXML-Instalador-Completo-Abas-Fix.exe").Path'
+new='$installer = (Resolve-Path "dist/CSM Visualizador XML 3.10.2 - Instalador Completo.exe").Path'
+if old in t:
+    t=t.replace(old,new,1)
+elif new not in t:
+    raise SystemExit('Caminho do instalador no teste legado nao reconhecido')
+test.write_text(t,encoding='utf-8',newline='\n')
+
+print('ISS preparado para 3.10.2 com abertura pos-instalacao limpa e homologacao apontando para o EXE real.')
