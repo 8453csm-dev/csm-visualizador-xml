@@ -9,8 +9,9 @@ if MARK in s:
 if 'CSM_LAUNCHER_CERT_MANAGER_3130' not in s:
     raise SystemExit('Aplique patch_launcher_cert_manager_3130.py antes')
 
-anchor='type fiscalCertificateValidateRequest struct { Path string `json:"path"`; Password string `json:"password"` }\n'
-if anchor not in s: raise SystemExit('tipo fiscalCertificateValidateRequest ausente')
+anchor='type fiscalCertificateValidateRequest struct { ID string `json:"id"`; Path string `json:"path"`; Password string `json:"password"` }\n'
+if anchor not in s:
+    raise SystemExit('tipo fiscalCertificateValidateRequest ausente')
 s=s.replace(anchor,anchor+'type fiscalManifestRequest struct { Key string `json:"key"`; CNPJ string `json:"cnpj"`; Event string `json:"event"` }\n',1)
 
 anchor='''func (b *broker) handleFiscalConsult(w http.ResponseWriter, r *http.Request) {'''
