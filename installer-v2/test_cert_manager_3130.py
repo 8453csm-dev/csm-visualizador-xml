@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,8 +15,9 @@ def run(cmd, **kwargs):
 
 
 def winpath(value):
-    value = str(value).replace('\\\\', '\\')
-    return os.path.normcase(os.path.normpath(value))
+    value = str(value).replace('/', '\\')
+    value = re.sub(r'\\+', r'\\', value)
+    return value.rstrip('\\').lower()
 
 
 def compile_core(out):
