@@ -71,8 +71,9 @@ jobs:
         run: |
           $fx=Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
           $csc=Join-Path $fx "csc.exe"
+          $src=(Resolve-Path "installer-v2/launcher/csm_fiscal_core.cs").Path
           $out=Join-Path $env:TEMP "CSM Fiscal Core 3130 Test.exe"
-          & $csc /nologo /target:exe /optimize+ /platform:x64 "/out:$out" "/reference:$(Join-Path $fx 'System.Web.Extensions.dll')" "/reference:$(Join-Path $fx 'System.Security.dll')" "/reference:$(Join-Path $fx 'System.Xml.dll')" "/reference:$(Join-Path $fx 'System.Xml.Linq.dll')" installer-v2/launcher/csm_fiscal_core.cs
+          & $csc /nologo /target:exe /optimize+ /platform:x64 "/out:$out" "/reference:$(Join-Path $fx 'System.Web.Extensions.dll')" "/reference:$(Join-Path $fx 'System.Security.dll')" "/reference:$(Join-Path $fx 'System.Xml.dll')" "/reference:$(Join-Path $fx 'System.Xml.Linq.dll')" $src
           if($LASTEXITCODE -ne 0){throw "Fiscal Core 3.13.0 não compilou"}
           $p=Start-Process $out -ArgumentList 'selftest' -Wait -PassThru -WindowStyle Hidden
           if($p.ExitCode -ne 0){throw "Self-test Fiscal Core 3.13.0 falhou"}
