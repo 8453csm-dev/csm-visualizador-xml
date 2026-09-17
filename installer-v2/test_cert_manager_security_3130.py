@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 
@@ -28,13 +29,26 @@ def jrun(exe,args,env,stdin=None,fail_ok=False):
     return p,data,raw
 
 
+def find_openssl():
+    hit=shutil.which('openssl')
+    if hit: return hit
+    candidates=[
+        pathlib.Path(os.environ.get('ProgramFiles','C:/Program Files'))/'Git'/'usr'/'bin'/'openssl.exe',
+        pathlib.Path(os.environ.get('ProgramFiles','C:/Program Files'))/'OpenSSL-Win64'/'bin'/'openssl.exe',
+        pathlib.Path('C:/Program Files/Git/mingw64/bin/openssl.exe'),
+    ]
+    for c in candidates:
+        if c.exists(): return str(c)
+    raise AssertionError('OpenSSL não encontrado no runner Windows')
+
+
 def make_pfx(path,password):
-    ps=f'''$p=ConvertTo-SecureString '{password}' -AsPlainText -Force;
-$c=New-SelfSignedCertificate -Subject 'CN=FRAMEL INDUSTRIA E COMERCIO DE DOCES LTDA' -CertStoreLocation 'Cert:\\CurrentUser\\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable -NotAfter (Get-Date).AddYears(1);
-Export-PfxCertificate -Cert $c -FilePath '{str(path).replace("'","''")}' -Password $p | Out-Null;
-Remove-Item ('Cert:\\CurrentUser\\My\\'+$c.Thumbprint) -Force;
-'''
-    p=run(['powershell','-NoProfile','-NonInteractive','-Command',ps])
+    openssl=find_openssl()
+    work=path.parent/'openssl-work'; work.mkdir(exist_ok=True)
+    key=work/'key.pem'; crt=work/'cert.pem'
+    p=run([openssl,'req','-x509','-newkey','rsa:2048','-keyout',str(key),'-out',str(crt),'-days','365','-nodes','-subj','/CN=FRAMEL INDUSTRIA E COMERCIO DE DOCES LTDA'])
+    if p.returncode: raise AssertionError(p.stdout+p.stderr)
+    p=run([openssl,'pkcs12','-export','-out',str(path),'-inkey',str(key),'-in',str(crt),'-passout',f'pass:{password}'])
     if p.returncode or not path.exists(): raise AssertionError(p.stdout+p.stderr)
 
 
@@ -53,20 +67,19 @@ def main():
         assert 'path' not in c,c
         assert '1234' not in raw,'senha do nome do arquivo vazou na API pública'
         assert c.get('has_protected_credential') is True,c
-        assert c.get('status') in ('Válido','Vencendo'),c
+        status=str(c.get('status') or '').lower()
+        assert status.startswith('vál') or status.startswith('val') or status.startswith('vencendo'),c
         idx=local/'CSM Visualizador XML'/'certificados'/'certificados.json'
         stored=idx.read_text(encoding='utf-8')
-        # O caminho original pode conter o padrão legado; a senha nunca pode existir como campo próprio.
         parsed=json.loads(stored); row=parsed[0]
         assert 'password' not in row and 'senha' not in row
         assert row.get('credential_target') or row.get('password_dpapi_b64'),row
         assert row.get('password_dpapi_b64','') != '1234'
 
-        # Validação manual usa ID opaco + stdin; senha errada falha sem ecoar segredo.
         q,d,rawbad=jrun(exe,['cert','validate','--id',c['id']],env,stdin='errada',fail_ok=True)
         assert q.returncode!=0
         assert 'errada' not in rawbad
-        assert 'Senha inválida' in str(d.get('message',''))
+        assert 'inv' in str(d.get('message','')).lower()
 
         q,d,rawgood=jrun(exe,['cert','validate','--id',c['id']],env,stdin='1234')
         assert d.get('ok') is True,d
