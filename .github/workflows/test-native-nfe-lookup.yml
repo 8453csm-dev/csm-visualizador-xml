@@ -8,6 +8,8 @@ on:
       - "installer-v2/native_nfe_lookup.css"
       - "installer-v2/patch_native_nfe_lookup_web.py"
       - "installer-v2/patch_launcher_native_nfe_lookup.py"
+      - "installer-v2/patch_release_identity_native_3103.py"
+      - "installer-v2/prepare_release_native_3103.py"
       - "installer-v2/launcher/native_nfe_lookup_windows.go"
       - "installer-v2/launcher/native_nfe_lookup_windows_test.go"
       - ".github/workflows/test-native-nfe-lookup.yml"
@@ -40,7 +42,7 @@ jobs:
         run: |
           node --check installer-v2/native_nfe_lookup.js
           if($LASTEXITCODE -ne 0){throw "JavaScript da consulta NF-e invalido"}
-          python -m py_compile installer-v2/patch_native_nfe_lookup_web.py installer-v2/patch_launcher_native_nfe_lookup.py
+          python -m py_compile installer-v2/patch_native_nfe_lookup_web.py installer-v2/patch_launcher_native_nfe_lookup.py installer-v2/patch_release_identity_native_3103.py installer-v2/prepare_release_native_3103.py
           if($LASTEXITCODE -ne 0){throw "Patch Python da consulta NF-e invalido"}
 
       - name: Montar launcher com consulta NF-e nativa
@@ -74,17 +76,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path temp | Out-Null
           gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
           if($LASTEXITCODE -ne 0){throw "Falha ao baixar base 3.7.8"}
-          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "temp/payload"
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "installer-v2/payload"
           if($LASTEXITCODE -ne 0){throw "Falha ao extrair payload"}
-          python installer-v2/patch_runtime.py "temp/payload/_internal/web"
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
           if($LASTEXITCODE -ne 0){throw "Patch runtime falhou"}
           python installer-v2/patch_lookup_order.py
           if($LASTEXITCODE -ne 0){throw "Patch de ordem do Localizador falhou"}
-          python installer-v2/patch_native_nfe_lookup_web.py "temp/payload/_internal/web"
+          python installer-v2/patch_native_nfe_lookup_web.py "installer-v2/payload/_internal/web"
           if($LASTEXITCODE -ne 0){throw "Patch web da consulta NF-e falhou"}
-          node --check "temp/payload/_internal/web/native_nfe_lookup.js"
+          node --check "installer-v2/payload/_internal/web/native_nfe_lookup.js"
           if($LASTEXITCODE -ne 0){throw "JavaScript instalado no payload invalido"}
-          $index=Get-Content "temp/payload/_internal/web/index.html" -Raw
+          $index=Get-Content "installer-v2/payload/_internal/web/index.html" -Raw
           foreach($token in @('native_nfe_lookup.css','native_nfe_lookup.js','http://127.0.0.1:47878')){if(!$index.Contains($token)){throw "Payload final sem $token"}}
 
       - name: Resultado
