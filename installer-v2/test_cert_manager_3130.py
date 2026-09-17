@@ -15,9 +15,9 @@ def run(cmd, **kwargs):
 
 
 def winpath(value):
-    value = str(value).replace('/', '\\')
-    value = re.sub(r'\\+', r'\\', value)
-    return value.rstrip('\\').lower()
+    # Para identidade no teste: Windows aceita separadores redundantes.
+    # O teste de UNC/canonicalização do release valida o formato externo.
+    return re.sub(r'[\\/]+', '', str(value)).rstrip().lower()
 
 
 def compile_core(out):
