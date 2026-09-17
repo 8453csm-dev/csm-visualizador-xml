@@ -43,9 +43,10 @@ function saveHistory(key){
   try{localStorage.setItem(HISTORY_KEY,JSON.stringify(list.slice(0,MAX_HISTORY)))}catch(_){}
 }
 
+function isOwnNativeControl(el){return !!(el?.matches?.('[data-csm-native-lookup="1"]')||el?.closest?.('#csm-native-lookup-overlay'))}
 function findLocatorTrigger(){
-  const els=[...document.querySelectorAll('button,[role="button"],a')].filter(visible);
-  return els.find(el=>{const t=normText(textOf(el));return t.includes('localizador fiscal')||t==='localizador'||t.includes('consultar nfe')||t.includes('consultar nf-e')});
+  const els=[...document.querySelectorAll('button,[role="button"],a')].filter(el=>visible(el)&&!isOwnNativeControl(el));
+  return els.find(el=>{const t=normText(textOf(el));return t.includes('localizador fiscal')||t==='localizador'||t.includes('consulta danfe')||t.includes('meu danfe')});
 }
 function inputScore(el){
   if(el.closest?.('#csm-native-lookup-overlay'))return -999;
@@ -86,7 +87,7 @@ function setProviderAndFormat(root){
 function findActionButton(input){
   let root=input.parentElement;
   for(let depth=0;root&&depth<7;depth++,root=root.parentElement){
-    const buttons=[...root.querySelectorAll('button,[role="button"],a')].filter(el=>!el.closest('#csm-native-lookup-overlay'));
+    const buttons=[...root.querySelectorAll('button,[role="button"],a')].filter(el=>!isOwnNativeControl(el));
     const hit=buttons.find(el=>{const t=normText(textOf(el));return /consultar|localizar|buscar|baixar/.test(t)&&!/historico|limpar/.test(t)});
     if(hit)return {button:hit,root};
   }
