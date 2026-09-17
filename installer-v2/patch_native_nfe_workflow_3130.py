@@ -57,7 +57,7 @@ window.CSMNFe3130={show:openModal,version:'3.13.0'};
 '''
 
 s=s.rstrip()+"\n\n"+module.strip()+"\n"
-for tok in (MARK,'Obter XML completo','/fiscal/nfe/manifestar','/fiscal/nfe/export-xml','/fiscal/certificate-folders/add','/fiscal/certificate/pick','Registrar Ciência'):
+for tok in (MARK,'Obter XML completo','/fiscal/nfe/manifestar','/fiscal/nfe/export-xml','/fiscal/certificate-folders/add','/fiscal/certificate/pick','Ciência da Operação'):
     if tok not in s: raise SystemExit('Frontend 3.13.0 incompleto: '+tok)
 app.write_text(s,encoding='utf-8',newline='\n')
 print('3.13.0: fluxo nativo NF-e + certificados + Ciência + XML aplicado ao frontend.')
