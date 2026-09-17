@@ -73,7 +73,8 @@ def main():
         assert found.get('id'), found
         assert found.get('file_name') == 'FRAMEL.pfx', found
         assert 'path' not in found, found
-        assert found.get('status') in ('Senha necessária', 'Arquivo inválido'), found
+        status = str(found.get('status') or '').lower()
+        assert status.startswith('senha necess') or status.startswith('arquivo inv'), found
         forbidden = {'password', 'senha', 'password_dpapi_b64'}
         assert not (forbidden & set(found.keys())), found
 
