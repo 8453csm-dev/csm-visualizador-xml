@@ -11,7 +11,7 @@ if 'CSM_FISCAL_CORE_BROKER_3120' not in s:
 
 anchor='type fiscalConsultRequest struct { Key string `json:"key"`; CNPJ string `json:"cnpj"` }\n'
 if anchor not in s: raise SystemExit('fiscalConsultRequest ausente')
-s=s.replace(anchor, anchor + '''type fiscalFolderRequest struct { Path string `json:"path"` }\ntype fiscalCertificateValidateRequest struct { Path string `json:"path"`; Password string `json:"password"` }\n''',1)
+s=s.replace(anchor, anchor + '''type fiscalFolderRequest struct { Path string `json:"path"` }\ntype fiscalCertificateValidateRequest struct { ID string `json:"id"`; Path string `json:"path"`; Password string `json:"password"` }\n''',1)
 
 anchor='''func (b *broker) handleFiscalCertificates(w http.ResponseWriter, r *http.Request) {'''
 if anchor not in s: raise SystemExit('handleFiscalCertificates ausente')
@@ -77,9 +77,12 @@ func (b *broker) handleFiscalCertificateValidate(w http.ResponseWriter, r *http.
     if r.Method != http.MethodPost { http.Error(w, "method not allowed", http.StatusMethodNotAllowed); return }
     var req fiscalCertificateValidateRequest
     if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil { http.Error(w, "invalid request", http.StatusBadRequest); return }
+    req.ID = strings.TrimSpace(req.ID)
     req.Path = strings.TrimSpace(req.Path)
-    if req.Path == "" { http.Error(w, "path required", http.StatusBadRequest); return }
-    out, err := b.runFiscalCoreWithInput(req.Password, "cert", "validate", "--path", req.Path)
+    if req.ID == "" && req.Path == "" { http.Error(w, "certificate id required", http.StatusBadRequest); return }
+    args := []string{"cert", "validate"}
+    if req.ID != "" { args = append(args, "--id", req.ID) } else { args = append(args, "--path", req.Path) }
+    out, err := b.runFiscalCoreWithInput(req.Password, args...)
     req.Password = ""
     writeFiscalJSON(w, out, err)
 }
@@ -92,6 +95,6 @@ new='''    mux.HandleFunc("/fiscal/certificates", b.handleFiscalCertificates)\n 
 if old not in s: raise SystemExit('Registro fiscal no mux não localizado')
 s=s.replace(old,new,1)
 
-s=s.rstrip()+"\n// "+MARK+" — gestão A1 local; senha transmitida ao child somente por stdin.\n"
+s=s.rstrip()+"\n// "+MARK+" — gestão A1 local; senha via stdin e certificados por ID opaco.\n"
 p.write_text(s,encoding='utf-8',newline='\n')
 print('3.13.0: endpoints locais de certificados adicionados ao broker.')
