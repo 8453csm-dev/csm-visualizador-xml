@@ -1,0 +1,242 @@
+name: Build CSM Visualizador XML 3.11.4 Final
+
+on:
+  push:
+    branches: ["release/3.11.4"]
+    paths:
+      - "installer-v2/**"
+      - ".github/workflows/build-3.11.4-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
+      - name: Baixar base estável 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+          if($LASTEXITCODE -ne 0){throw "Falha ao baixar base 3.7.8"}
+
+      - name: Montar payload completo 3.11.4
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "installer-v2/payload"
+          if($LASTEXITCODE -ne 0){throw "Falha ao extrair base"}
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Runtime falhou"}
+          python installer-v2/patch_lookup_order.py
+          if($LASTEXITCODE -ne 0){throw "Lookup base falhou"}
+          python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Devolução falhou"}
+          python installer-v2/patch_tax_explainer.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Tributação falhou"}
+          python installer-v2/patch_tax_explainer_entrypoint_v2.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Entrada tributária falhou"}
+          python installer-v2/patch_difal_st.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "DIFAL/ST falhou"}
+          python installer-v2/patch_difal_display_3102.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Visual DIFAL falhou"}
+          python installer-v2/patch_folder_import_progress.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_folder_import_progress_v2.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_folder_import_progress_v3.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Modal de pasta falhou"}
+          python installer-v2/patch_native_lookup_action_3111.py
+          if($LASTEXITCODE -ne 0){throw "Base do módulo nativo falhou"}
+          python installer-v2/patch_native_lookup_3110.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Consulta NF-e base falhou"}
+          python installer-v2/patch_native_lookup_visibility_3113.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Patch visual base falhou"}
+          python installer-v2/patch_lookup_status_toast_3112.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Status da consulta falhou"}
+          python installer-v2/patch_native_lookup_core_3114.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Consulta direta 3.11.4 falhou"}
+          python installer-v2/patch_release_identity_3114.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          if($LASTEXITCODE -ne 0){throw "Identidade 3.11.4 falhou"}
+          python installer-v2/patch_tax_explainer.py --extract temp/taxsrc
+          if($LASTEXITCODE -ne 0){throw "Extração fiscal de teste falhou"}
+          Copy-Item installer-v2/tax_explainer_entrypoint_v2.js temp/taxsrc/tax_explainer_entrypoint_v2.js -Force
+          $app=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          $css=(Resolve-Path "installer-v2/payload/_internal/web/refinement.css").Path
+          Copy-Item $app temp/app-3114.mjs -Force
+          node --check temp/app-3114.mjs
+          if($LASTEXITCODE -ne 0){throw "app.js final inválido"}
+          $bi=Get-Content "installer-v2/payload/_internal/csm/build-info.json" -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.11.4' -or !$bi.native_key_lookup_direct_broker -or !$bi.native_key_lookup_no_legacy_dom_actions -or $bi.native_key_lookup_fixed_button -ne '3.11.4' -or !$bi.native_key_lookup_blocks_xml_library_excel -or !$bi.native_key_lookup_xml_only -or !$bi.postinstall_fresh_launcher){throw "Build-info 3.11.4 incorreto"}
+
+      - name: Testar Consulta direta e módulos fiscais
+        shell: pwsh
+        run: |
+          npm install --no-save jsdom@26.1.0
+          if($LASTEXITCODE -ne 0){throw "jsdom não instalou"}
+          $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          $env:CSM_CSS=(Resolve-Path "installer-v2/payload/_internal/web/refinement.css").Path
+          node installer-v2/test_native_lookup_direct_3114.js
+          if($LASTEXITCODE -ne 0){throw "Consulta NF-e direta / botão próprio falhou"}
+          node installer-v2/test_folder_import_progress_v3.js
+          if($LASTEXITCODE -ne 0){throw "Modal de pasta regrediu"}
+          node installer-v2/test_difal_st.js
+          if($LASTEXITCODE -ne 0){throw "DIFAL/ST regrediu"}
+          node installer-v2/test_difal_display_3102.js
+          if($LASTEXITCODE -ne 0){throw "Visual DIFAL regrediu"}
+          node installer-v2/test_devolution_engine.js
+          if($LASTEXITCODE -ne 0){throw "Devolução base regrediu"}
+          node installer-v2/test_devolution_engine_v3.js
+          if($LASTEXITCODE -ne 0){throw "Devolução ST regrediu"}
+          node installer-v2/test_devolution_entrypoint_v4.js
+          if($LASTEXITCODE -ne 0){throw "Entrada da devolução regrediu"}
+          $env:CSM_TAX_CORE=(Resolve-Path temp/taxsrc/tax_engine_core.js).Path
+          $env:CSM_TAX_UI=(Resolve-Path temp/taxsrc/tax_explainer_ui.js).Path
+          $env:CSM_TAX_ENTRY=(Resolve-Path temp/taxsrc/tax_explainer_entrypoint_v2.js).Path
+          node installer-v2/test_tax_engine.js
+          if($LASTEXITCODE -ne 0){throw "Motor tributário regrediu"}
+          node installer-v2/test_tax_ui.js
+          if($LASTEXITCODE -ne 0){throw "UI tributária regrediu"}
+          node installer-v2/test_tax_no_freeze.js
+          if($LASTEXITCODE -ne 0){throw "No-freeze tributário regrediu"}
+          node installer-v2/test_tax_entrypoint_v2.js
+          if($LASTEXITCODE -ne 0){throw "Entrada tributária regrediu"}
+
+      - name: Preparar launcher e helper XML-only sem planilhas
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          if($LASTEXITCODE -ne 0){throw "Instância única falhou"}
+          python installer-v2/patch_launcher_lookup.py
+          if($LASTEXITCODE -ne 0){throw "Broker lookup falhou"}
+          python installer-v2/patch_launcher_395.py
+          if($LASTEXITCODE -ne 0){throw "Launcher base falhou"}
+          python installer-v2/patch_launcher_fresh_core_3102.py
+          if($LASTEXITCODE -ne 0){throw "Fresh Core falhou"}
+          python installer-v2/patch_lookup_delivery_3112.py
+          if($LASTEXITCODE -ne 0){throw "Entrega XML-only falhou"}
+          python installer-v2/patch_lookup_save_dialog_3112.py
+          if($LASTEXITCODE -ne 0){throw "Save dialog 3.11.2 falhou"}
+          python installer-v2/patch_lookup_status_tag_3112.py
+          if($LASTEXITCODE -ne 0){throw "Status da NF-e falhou"}
+          python installer-v2/patch_lookup_dialog_3114.py
+          if($LASTEXITCODE -ne 0){throw "Bloqueio definitivo de planilha falhou"}
+          python installer-v2/test_lookup_no_spreadsheet_3114.py installer-v2/launcher/consulta_danfe_helper.cs
+          if($LASTEXITCODE -ne 0){throw "Teste anti-planilha falhou"}
+          python installer-v2/patch_launcher_postinstall_fresh_3112.py
+          if($LASTEXITCODE -ne 0){throw "Pós-instalação fresh falhou"}
+          Get-ChildItem installer-v2/launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
+          $main=Get-Content installer-v2/launcher/main.go -Raw
+          $helperSrc=Get-Content installer-v2/launcher/consulta_danfe_helper.cs -Raw
+          foreach($token in @('/lookup-automation','--post-install-fresh','CSM_POSTINSTALL_LAUNCHER_3112','Nunca adotar um Core apenas pelo nome do processo')){if(!$main.Contains($token)){throw "Launcher sem $token"}}
+          foreach($token in @('CSM_LOOKUP_DELIVERY_3112','CSM_LOOKUP_NO_SPREADSHEET_3114','GetSaveDialogFileType','biblioteca de xml','ValidateXmlForKey','NotifyBrokerOpen')){if(!$helperSrc.Contains($token)){throw "Helper sem $token"}}
+          New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
+          $fx=Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319";$csc=Join-Path $fx "csc.exe"
+          $source=(Resolve-Path "installer-v2/launcher/consulta_danfe_helper.cs").Path
+          $helper=(Join-Path (Resolve-Path "installer-v2/payload/_internal/csm").Path "CSM Consulta DANFE Helper.exe")
+          & $csc /nologo /target:winexe /optimize+ /platform:x64 "/out:$helper" "/reference:$(Join-Path $fx 'WPF\UIAutomationClient.dll')" "/reference:$(Join-Path $fx 'WPF\UIAutomationTypes.dll')" "/reference:$(Join-Path $fx 'System.Windows.Forms.dll')" "/reference:$(Join-Path $fx 'System.Xml.Linq.dll')" $source
+          if($LASTEXITCODE -ne 0 -or !(Test-Path $helper)){throw "Helper não compilou"}
+          $original="installer-v2/payload/CSM Visualizador XML.exe";$core="installer-v2/payload/CSM Visualizador XML Core.exe";$icon=(Resolve-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico").Path
+          Move-Item -Force $original $core
+          go install github.com/akavel/rsrc@v0.10.2
+          if($LASTEXITCODE -ne 0){throw "rsrc não instalou"}
+          $rsrc=Join-Path (go env GOPATH) "bin\rsrc.exe";& $rsrc -arch amd64 -ico $icon -o "installer-v2/launcher/rsrc_windows_amd64.syso"
+          if($LASTEXITCODE -ne 0){throw "Ícone do launcher falhou"}
+          $env:GOOS='windows';$env:GOARCH='amd64';$env:CGO_ENABLED='0';$env:GO111MODULE='off'
+          Push-Location installer-v2/launcher
+          try{go build -trimpath -ldflags="-H windowsgui -s -w" -o "..\payload\CSM Visualizador XML.exe" .;if($LASTEXITCODE -ne 0){throw "Launcher não compilou"}}finally{Pop-Location}
+          $self=Start-Process "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Self-test launcher falhou"}
+
+      - name: Compilar instalador 3.11.4
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          if($LASTEXITCODE -ne 0){throw "Pillow não instalou"}
+          python installer-v2/make_brand.py
+          if($LASTEXITCODE -ne 0){throw "Brand falhou"}
+          python installer-v2/prepare_release_3114.py
+          if($LASTEXITCODE -ne 0){throw "Preparação do instalador falhou"}
+          $iss=Get-Content "installer-v2/CSMVisualizadorXML.iss" -Raw
+          if(!$iss.Contains('Parameters: "--post-install-fresh"') -or !$iss.Contains('Description: "Abrir CSM Visualizador XML 3.11.4"')){throw "Pós-instalação fresh ausente"}
+          $path="installer-v2/CSMVisualizadorXML.iss";$text=Get-Content $path -Raw;$text=[regex]::Replace($text,'(?m)^UninstallDisplayVersion=.*\r?\n','');[IO.File]::WriteAllText((Resolve-Path $path),$text,[Text.UTF8Encoding]::new($false))
+          $iscc="C:\Program Files (x86)\Inno Setup 6\ISCC.exe";if(!(Test-Path $iscc)){choco install innosetup -y --no-progress}
+          if(!(Test-Path $iscc)){throw "Inno Setup ausente"}
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $iscc "installer-v2/CSMVisualizadorXML.iss"
+          if($LASTEXITCODE -ne 0){throw "Compilação falhou"}
+          $base="dist/CSMVisualizadorXML-3.11.4-Instalador-Completo.exe";if(!(Test-Path $base)){throw "EXE não gerado"}
+          Copy-Item $base "dist/CSM Visualizador XML 3.11.4 - Instalador Completo.exe" -Force
+
+      - name: Homologar instalação limpa 3.11.4
+        shell: pwsh
+        run: |
+          $installer=(Resolve-Path "dist/CSM Visualizador XML 3.11.4 - Instalador Completo.exe").Path
+          $dir=Join-Path $env:TEMP "CSM-3114-Maquina-Limpa";Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+          $p=Start-Process $installer -ArgumentList ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="'+$dir+'"') -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Instalação limpa falhou"}
+          $info=Join-Path $dir "_internal\csm\build-info.json";$app=Join-Path $dir "_internal\web\app.js";$css=Join-Path $dir "_internal\web\refinement.css";$launcher=Join-Path $dir "CSM Visualizador XML.exe";$helper=Join-Path $dir "_internal\csm\CSM Consulta DANFE Helper.exe"
+          foreach($f in @($info,$app,$css,$launcher,$helper)){if(!(Test-Path $f)){throw "Payload instalado incompleto: $f"}}
+          $bi=Get-Content $info -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.11.4' -or !$bi.native_key_lookup_direct_broker -or !$bi.native_key_lookup_no_legacy_dom_actions -or $bi.native_key_lookup_fixed_button -ne '3.11.4' -or !$bi.native_key_lookup_blocks_xml_library_excel -or !$bi.postinstall_fresh_launcher){throw "Máquina limpa recebeu pacote errado"}
+          if(!(Select-String -Path $app -Pattern 'CSM_NATIVE_LOOKUP_DIRECT_3114' -Quiet)){throw "Consulta direta não foi instalada"}
+          if(!(Select-String -Path $app -Pattern 'CSM_NATIVE_LOOKUP_FIXED_BUTTON_3114' -Quiet)){throw "Botão próprio não foi instalado"}
+          $env:CSM_APP_JS=$app;$env:CSM_CSS=$css
+          node installer-v2/test_native_lookup_direct_3114.js
+          if($LASTEXITCODE -ne 0){throw "Consulta direta instalada falhou"}
+          node installer-v2/test_folder_import_progress_v3.js
+          if($LASTEXITCODE -ne 0){throw "Modal instalado falhou"}
+          $self=Start-Process $launcher -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Launcher instalado falhou self-test"}
+          $un=Join-Path $dir 'unins000.exe';if(Test-Path $un){Start-Process $un -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait}
+
+      - name: Homologar associação abas e desinstalação
+        shell: pwsh
+        run: |
+          $src=Get-Content "installer-v2/test_clean_association.ps1" -Raw -Encoding UTF8
+          foreach($v in @('3.8.0','3.8.1','3.9.0','3.9.1','3.9.2','3.9.3','3.9.4','3.9.5','3.9.6','3.10.0','3.10.1','3.10.2','3.11.0','3.11.1','3.11.2','3.11.3')){$src=$src.Replace($v,'3.11.4')}
+          $script=Join-Path (Resolve-Path temp) 'test_clean_3114.ps1';[IO.File]::WriteAllText($script,$src,[Text.UTF8Encoding]::new($false)); & $script
+          if($LASTEXITCODE -ne 0){throw "Limpeza/associação falhou"}
+          ./installer-v2/test_installed.ps1
+          if($LASTEXITCODE -ne 0){throw "Teste instalado/abas falhou"}
+
+      - name: Validação final
+        shell: pwsh
+        run: |
+          $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          $env:CSM_CSS=(Resolve-Path "installer-v2/payload/_internal/web/refinement.css").Path
+          node installer-v2/test_native_lookup_direct_3114.js
+          if($LASTEXITCODE -ne 0){throw "Consulta direta final falhou"}
+          python installer-v2/test_lookup_no_spreadsheet_3114.py installer-v2/launcher/consulta_danfe_helper.cs
+          if($LASTEXITCODE -ne 0){throw "Anti-planilha final falhou"}
+          node installer-v2/test_difal_st.js
+          node installer-v2/test_devolution_entrypoint_v4.js
+          if($LASTEXITCODE -ne 0){throw "Módulos fiscais finais falharam"}
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $exe="dist/CSM Visualizador XML 3.11.4 - Instalador Completo.exe"
+          $hash=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  CSM Visualizador XML 3.11.4 - Instalador Completo.exe" | Set-Content "dist/CSM Visualizador XML 3.11.4 - SHA256.txt" -Encoding ascii
+          Write-Host "SHA256=$hash"
+
+      - name: Publicar instalador homologado
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-3.11.4-Instalador-Final
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/CSM Visualizador XML 3.11.4 - Instalador Completo.exe
+            dist/CSM Visualizador XML 3.11.4 - SHA256.txt
