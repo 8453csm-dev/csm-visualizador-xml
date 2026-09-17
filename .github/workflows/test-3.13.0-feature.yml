@@ -24,6 +24,7 @@ jobs:
         run: |
           python installer-v2/patch_fiscal_core_3121.py
           python installer-v2/patch_fiscal_core_cert_manager_3130.py
+          python installer-v2/patch_cert_manager_paths_3130.py
       - name: Testar gerenciador A1 3.13.0
         shell: pwsh
         run: |
