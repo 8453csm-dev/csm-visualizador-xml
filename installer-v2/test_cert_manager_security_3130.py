@@ -4,6 +4,7 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 SRC=ROOT/'installer-v2'/'launcher'/'csm_fiscal_core.cs'
@@ -29,6 +30,11 @@ def jrun(exe,args,env,stdin=None,fail_ok=False):
     return p,data,raw
 
 
+def ascii_text(value):
+    text=unicodedata.normalize('NFKD',str(value or '').lower())
+    return ''.join(ch for ch in text if not unicodedata.combining(ch))
+
+
 def find_openssl():
     hit=shutil.which('openssl')
     if hit: return hit
@@ -39,7 +45,7 @@ def find_openssl():
     ]
     for c in candidates:
         if c.exists(): return str(c)
-    raise AssertionError('OpenSSL não encontrado no runner Windows')
+    raise AssertionError('OpenSSL nao encontrado no runner Windows')
 
 
 def make_pfx(path,password):
@@ -65,10 +71,10 @@ def main():
         assert c.get('id'),c
         assert c.get('file_name')=='FRAMEL.pfx',c
         assert 'path' not in c,c
-        assert '1234' not in raw,'senha do nome do arquivo vazou na API pública'
+        assert '1234' not in raw,'senha do nome do arquivo vazou na API publica'
         assert c.get('has_protected_credential') is True,c
-        status=str(c.get('status') or '').lower()
-        assert status.startswith('vál') or status.startswith('val') or status.startswith('vencendo'),c
+        status=ascii_text(c.get('status'))
+        assert status.startswith('val') or status.startswith('vencendo'),c
         idx=local/'CSM Visualizador XML'/'certificados'/'certificados.json'
         stored=idx.read_text(encoding='utf-8')
         parsed=json.loads(stored); row=parsed[0]
@@ -79,7 +85,7 @@ def main():
         q,d,rawbad=jrun(exe,['cert','validate','--id',c['id']],env,stdin='errada',fail_ok=True)
         assert q.returncode!=0
         assert 'errada' not in rawbad
-        assert 'inv' in str(d.get('message','')).lower()
+        assert 'inv' in ascii_text(d.get('message'))
 
         q,d,rawgood=jrun(exe,['cert','validate','--id',c['id']],env,stdin='1234')
         assert d.get('ok') is True,d
