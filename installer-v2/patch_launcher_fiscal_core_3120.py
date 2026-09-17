@@ -103,7 +103,7 @@ s=s.replace(anchor2,insert+anchor2,1)
 mux='''    mux.HandleFunc("/health", b.handleHealth)'''
 if mux not in s:
     raise SystemExit('registro /health não encontrado')
-s=s.replace(mux,''''    mux.HandleFunc("/fiscal/certificates", b.handleFiscalCertificates)
+s=s.replace(mux,'''    mux.HandleFunc("/fiscal/certificates", b.handleFiscalCertificates)
     mux.HandleFunc("/fiscal/nfe/consultar", b.handleFiscalConsult)
     mux.HandleFunc("/health", b.handleHealth)''',1)
 
