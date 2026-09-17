@@ -1,0 +1,29 @@
+name: Test CSM Visualizador XML 3.13.0 Feature
+
+on:
+  push:
+    branches: ["feature/nfe-certificados-integrados"]
+    paths:
+      - "installer-v2/**"
+      - ".github/workflows/test-3.13.0-feature.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cert-manager:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Aplicar correção Fiscal Core 3.12.1
+        shell: pwsh
+        run: |
+          python installer-v2/patch_fiscal_core_3121.py
+      - name: Testar gerenciador A1 3.13.0
+        shell: pwsh
+        run: |
+          python installer-v2/test_cert_manager_3130.py
