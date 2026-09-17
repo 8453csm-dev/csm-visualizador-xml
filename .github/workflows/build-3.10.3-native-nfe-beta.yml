@@ -1,0 +1,192 @@
+name: Build CSM Visualizador XML 3.10.3 Beta Consulta NF-e
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feature/consulta-nfe-chave-nativa"]
+    paths:
+      - "installer-v2/native_nfe_lookup.js"
+      - "installer-v2/native_nfe_lookup.css"
+      - "installer-v2/patch_native_nfe_lookup_web.py"
+      - "installer-v2/patch_launcher_native_nfe_lookup.py"
+      - "installer-v2/patch_release_identity_native_3103.py"
+      - "installer-v2/prepare_release_native_3103.py"
+      - "installer-v2/launcher/native_nfe_lookup_windows.go"
+      - "installer-v2/launcher/native_nfe_lookup_windows_test.go"
+      - ".github/workflows/build-3.10.3-native-nfe-beta.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Baixar base estavel 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+          if($LASTEXITCODE -ne 0){throw "Falha ao baixar base 3.7.8"}
+
+      - name: Montar payload 3.10.3 com Consulta NF-e Nativa
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "installer-v2/payload"
+          if($LASTEXITCODE -ne 0){throw "Falha ao extrair base"}
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Runtime falhou"}
+          python installer-v2/patch_lookup_order.py
+          if($LASTEXITCODE -ne 0){throw "Lookup falhou"}
+          python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Devolucao falhou"}
+          python installer-v2/patch_tax_explainer.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Tributacao falhou"}
+          python installer-v2/patch_tax_explainer_entrypoint_v2.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Entrada tributaria falhou"}
+          python installer-v2/patch_difal_st.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "DIFAL / ICMS ST falhou"}
+          python installer-v2/patch_difal_display_3102.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Refinamento DIFAL falhou"}
+          python installer-v2/patch_folder_import_progress.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Progresso V1 falhou"}
+          python installer-v2/patch_folder_import_progress_v2.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Progresso V2 falhou"}
+          python installer-v2/patch_folder_import_progress_v3.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Progresso V3 falhou"}
+          python installer-v2/patch_release_identity_3102.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          if($LASTEXITCODE -ne 0){throw "Identidade base 3.10.2 falhou"}
+          python installer-v2/patch_native_nfe_lookup_web.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Consulta NF-e web falhou"}
+          python installer-v2/patch_release_identity_native_3103.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          if($LASTEXITCODE -ne 0){throw "Identidade 3.10.3 falhou"}
+          node --check installer-v2/payload/_internal/web/native_nfe_lookup.js
+          if($LASTEXITCODE -ne 0){throw "JavaScript NF-e final invalido"}
+          Copy-Item installer-v2/payload/_internal/web/app.js temp/app-3103.mjs -Force
+          node --check temp/app-3103.mjs
+          if($LASTEXITCODE -ne 0){throw "app.js final invalido"}
+          $bi=Get-Content "installer-v2/payload/_internal/csm/build-info.json" -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.10.3' -or !$bi.native_nfe_lookup -or !$bi.native_nfe_cache -or !$bi.native_nfe_dpapi -or !$bi.native_nfe_loopback_guard){throw "Build-info 3.10.3 incorreto"}
+
+      - name: Preparar launcher nativo e testar motor NF-e
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          if($LASTEXITCODE -ne 0){throw "Instancia unica falhou"}
+          python installer-v2/patch_launcher_lookup.py
+          if($LASTEXITCODE -ne 0){throw "Lookup launcher falhou"}
+          python installer-v2/patch_launcher_395.py
+          if($LASTEXITCODE -ne 0){throw "Launcher base falhou"}
+          python installer-v2/patch_launcher_fresh_core_3102.py
+          if($LASTEXITCODE -ne 0){throw "Fresh Core falhou"}
+          python installer-v2/patch_launcher_native_nfe_lookup.py
+          if($LASTEXITCODE -ne 0){throw "Consulta NF-e launcher falhou"}
+          Get-ChildItem installer-v2/launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
+          $env:GOOS='windows';$env:GOARCH='amd64';$env:CGO_ENABLED='0';$env:GO111MODULE='off'
+          Push-Location installer-v2/launcher
+          try {
+            go test .
+            if($LASTEXITCODE -ne 0){throw "Testes do motor NF-e falharam"}
+          } finally { Pop-Location }
+
+      - name: Compilar launcher e helper Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
+          $fx=Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319"
+          $csc=Join-Path $fx "csc.exe"
+          $source=(Resolve-Path "installer-v2/launcher/consulta_danfe_helper.cs").Path
+          $helper=(Join-Path (Resolve-Path "installer-v2/payload/_internal/csm").Path "CSM Consulta DANFE Helper.exe")
+          & $csc /nologo /target:winexe /optimize+ /platform:x64 "/out:$helper" "/reference:$(Join-Path $fx 'WPF\UIAutomationClient.dll')" "/reference:$(Join-Path $fx 'WPF\UIAutomationTypes.dll')" "/reference:$(Join-Path $fx 'System.Windows.Forms.dll')" $source
+          if($LASTEXITCODE -ne 0 -or !(Test-Path $helper)){throw "Helper nao compilou"}
+          $original="installer-v2/payload/CSM Visualizador XML.exe"
+          $core="installer-v2/payload/CSM Visualizador XML Core.exe"
+          $icon=(Resolve-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico").Path
+          Move-Item -Force $original $core
+          go install github.com/akavel/rsrc@v0.10.2
+          if($LASTEXITCODE -ne 0){throw "rsrc nao instalou"}
+          $rsrc=Join-Path (go env GOPATH) "bin\rsrc.exe"
+          & $rsrc -arch amd64 -ico $icon -o "installer-v2/launcher/rsrc_windows_amd64.syso"
+          if($LASTEXITCODE -ne 0){throw "Icone launcher falhou"}
+          $env:GOOS='windows';$env:GOARCH='amd64';$env:CGO_ENABLED='0';$env:GO111MODULE='off'
+          Push-Location installer-v2/launcher
+          try {
+            go build -trimpath -ldflags="-H windowsgui -s -w" -o "..\payload\CSM Visualizador XML.exe" .
+            if($LASTEXITCODE -ne 0){throw "Launcher nao compilou"}
+          } finally { Pop-Location }
+          $self=Start-Process "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Self-test launcher falhou: $($self.ExitCode)"}
+
+      - name: Preparar e compilar instalador beta 3.10.3
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          if($LASTEXITCODE -ne 0){throw "Pillow nao instalou"}
+          python installer-v2/make_brand.py
+          if($LASTEXITCODE -ne 0){throw "Brand falhou"}
+          python installer-v2/prepare_release_3102.py
+          if($LASTEXITCODE -ne 0){throw "Preparacao base 3.10.2 falhou"}
+          python installer-v2/prepare_release_native_3103.py
+          if($LASTEXITCODE -ne 0){throw "Preparacao beta 3.10.3 falhou"}
+          $path="installer-v2/CSMVisualizadorXML.iss"
+          $text=Get-Content $path -Raw
+          $text=[regex]::Replace($text,'(?m)^UninstallDisplayVersion=.*\r?\n','')
+          [IO.File]::WriteAllText((Resolve-Path $path),$text,[Text.UTF8Encoding]::new($false))
+          $iscc="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if(!(Test-Path $iscc)){choco install innosetup -y --no-progress}
+          if(!(Test-Path $iscc)){throw "Inno Setup ausente"}
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $iscc "installer-v2/CSMVisualizadorXML.iss"
+          if($LASTEXITCODE -ne 0){throw "Compilacao do instalador falhou"}
+          $exe="dist/CSMVisualizadorXML-3.10.3-Consulta-NFe-Beta.exe"
+          if(!(Test-Path $exe)){throw "EXE beta nao gerado"}
+          (Get-FileHash $exe -Algorithm SHA256).Hash | Set-Content "dist/CSMVisualizadorXML-3.10.3-Consulta-NFe-Beta.sha256.txt"
+
+      - name: Homologar instalacao beta em pasta limpa
+        shell: pwsh
+        run: |
+          $installer=(Resolve-Path "dist/CSMVisualizadorXML-3.10.3-Consulta-NFe-Beta.exe").Path
+          $dir=Join-Path $env:TEMP "CSM-3103-NativeNFe-Beta"
+          Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+          $p=Start-Process $installer -ArgumentList ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="'+$dir+'"') -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Instalacao beta falhou"}
+          $info=Join-Path $dir "_internal\csm\build-info.json"
+          $js=Join-Path $dir "_internal\web\native_nfe_lookup.js"
+          $css=Join-Path $dir "_internal\web\native_nfe_lookup.css"
+          $launcher=Join-Path $dir "CSM Visualizador XML.exe"
+          if(!(Test-Path $info)-or!(Test-Path $js)-or!(Test-Path $css)-or!(Test-Path $launcher)){throw "Instalacao beta incompleta"}
+          $bi=Get-Content $info -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.10.3' -or $bi.native_nfe_lookup -ne '1.0.0' -or !$bi.native_nfe_cache -or !$bi.native_nfe_dpapi){throw "Identidade instalada incorreta"}
+          node --check $js
+          if($LASTEXITCODE -ne 0){throw "JS instalado invalido"}
+          $self=Start-Process $launcher -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Launcher instalado falhou self-test"}
+          $un=Join-Path $dir 'unins000.exe'
+          if(Test-Path $un){Start-Process $un -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait}
+
+      - name: Publicar artefato beta
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-3.10.3-Consulta-NFe-Beta
+          path: |
+            dist/CSMVisualizadorXML-3.10.3-Consulta-NFe-Beta.exe
+            dist/CSMVisualizadorXML-3.10.3-Consulta-NFe-Beta.sha256.txt
+          if-no-files-found: error
+          retention-days: 14
