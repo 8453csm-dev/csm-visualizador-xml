@@ -46,3 +46,21 @@ jobs:
         shell: pwsh
         run: |
           python installer-v2/test_launcher_cert_manager_3130.py
+
+  manifestacao:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Aplicar base Fiscal Core 3.12.1 e certificados
+        shell: pwsh
+        run: |
+          python installer-v2/patch_fiscal_core_3121.py
+          python installer-v2/patch_fiscal_core_cert_manager_3130.py
+          python installer-v2/patch_cert_manager_paths_3130.py
+      - name: Testar Ciência da Operação 3.13.0
+        shell: pwsh
+        run: |
+          python installer-v2/test_manifestacao_3130.py
