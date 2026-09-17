@@ -11,10 +11,16 @@ required = [
     '/fiscal/certificates/scan',
     '/fiscal/certificate/validate',
     '/fiscal/nfe/manifestar',
+    '/fiscal/nfe/open-cached',
+    '/fiscal/nfe/export-xml',
     'handleFiscalCertificateFolders',
     'handleFiscalCertificateValidate',
     'handleFiscalManifest',
+    'handleFiscalOpenCached',
+    'handleFiscalExportXML',
     'runFiscalCoreWithInput',
+    'GetSaveFileNameW',
+    'cachedNFePath',
     'io.LimitReader',
     'fiscalOriginAllowed',
 ]
@@ -22,7 +28,6 @@ missing = [x for x in required if x not in s]
 if missing:
     raise SystemExit('API local fiscal 3.13.0 incompleta: ' + ', '.join(missing))
 
-# A senha nunca pode ser enviada por query string nem argumento do processo.
 validate_start = s.find('func (b *broker) handleFiscalCertificateValidate')
 validate_end = s.find('\nfunc ', validate_start + 10)
 if validate_start < 0:
@@ -33,8 +38,9 @@ for forbidden in ['"--password"', 'URL.Query().Get("password")', 'URL.Query().Ge
         raise SystemExit('Senha exposta no broker: ' + forbidden)
 if 'runFiscalCoreWithInput(req.Password' not in block:
     raise SystemExit('Senha não está sendo encaminhada por stdin')
+if 'req.ID' not in block or '"--id", req.ID' not in block:
+    raise SystemExit('Validação do A1 não usa ID opaco')
 
-# A manifestação deve ser estritamente a Ciência 210210.
 manifest_start=s.find('func (b *broker) handleFiscalManifest')
 manifest_end=s.find('\nfunc ',manifest_start+10)
 if manifest_start < 0:
@@ -44,8 +50,15 @@ for token in ['req.Event != "210210"','"manifest", "--key", req.Key','"--event",
     if token not in manifest:
         raise SystemExit('Manifestação sem trava obrigatória: '+token)
 
-# CORS deve continuar restrito ao app/local host.
+# Export deve copiar bytes do cache validado, não reconstruir o XML.
+export_start=s.find('func (b *broker) handleFiscalExportXML')
+export_end=s.find('\nfunc ',export_start+10)
+export=s[export_start:export_end if export_end>export_start else len(s)]
+for token in ['cachedNFePath(req.Key)','os.ReadFile(src)','os.WriteFile(dst,raw','chooseXMLSavePath']:
+    if token not in export:
+        raise SystemExit('Exportação XML não preserva cache oficial: '+token)
+
 if 'origin not allowed' not in s or 'pywebview.local' not in s:
     raise SystemExit('Proteção de origem fiscal ausente')
 
-print('OK - certificados + Ciência 210210 protegidos pelo broker local.')
+print('OK - certificados, Ciência, reabertura e exportação XML protegidos pelo broker local.')
