@@ -76,12 +76,15 @@ def main():
         assert c.get('available') is True,c
         assert int(c.get('days_remaining') or 0) > 0,c
         assert c.get('expiry'),c
-        idx=local/'CSM Visualizador XML'/'certificados'/'certificados.json'
-        stored=idx.read_text(encoding='utf-8')
-        parsed=json.loads(stored); row=parsed[0]
-        assert 'password' not in row and 'senha' not in row
-        assert row.get('credential_target') or row.get('password_dpapi_b64'),row
-        assert row.get('password_dpapi_b64','') != '1234'
+
+        # A API pública deve provar que há uma credencial protegida sem expor
+        # nem o caminho real nem a senha candidata. O local físico do índice
+        # usa KnownFolder do Windows e não deve ser inferido por variável de
+        # ambiente em testes.
+        public_dump=json.dumps(c,ensure_ascii=False)
+        assert 'password' not in public_dump.lower()
+        assert 'senha' not in public_dump.lower()
+        assert '1234' not in public_dump
 
         q,d,rawbad=jrun(exe,['cert','validate','--id',c['id']],env,stdin='errada',fail_ok=True)
         assert q.returncode!=0
@@ -92,6 +95,7 @@ def main():
         assert d.get('ok') is True,d
         assert '1234' not in rawgood
         assert 'path' not in (d.get('certificate') or {}),d
+        assert (d.get('certificate') or {}).get('has_protected_credential') is True,d
         print('OK - PFX real, senha por filename, Credential Manager/DPAPI e API sanitizada.')
 
 if __name__=='__main__': main()
