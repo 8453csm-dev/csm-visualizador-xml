@@ -9,21 +9,18 @@ if MARK in s:
 if 'CSM_LAUNCHER_MANIFESTACAO_3130' not in s:
     raise SystemExit('Aplique o broker de manifestação antes')
 
-# runtime é usado para manter o diálogo do Windows no mesmo OS thread.
 if '"runtime"' not in s:
     s=s.replace('    "path/filepath"\n','    "path/filepath"\n    "runtime"\n',1)
 
-# Comdlg32.
 old='''    kernel32 = syscall.NewLazyDLL("kernel32.dll")\n    user32   = syscall.NewLazyDLL("user32.dll")'''
 new='''    kernel32  = syscall.NewLazyDLL("kernel32.dll")\n    user32    = syscall.NewLazyDLL("user32.dll")\n    comdlg32  = syscall.NewLazyDLL("comdlg32.dll")'''
 if old not in s: raise SystemExit('DLL vars não localizadas')
 s=s.replace(old,new,1)
 old='''    procMessageBoxW              = user32.NewProc("MessageBoxW")\n)'''
-new='''    procMessageBoxW              = user32.NewProc("MessageBoxW")\n    procGetSaveFileNameW         = comdlg32.NewProc("GetSaveFileNameW")\n)'''
+new='''    procMessageBoxW              = user32.NewProc("MessageBoxW")\n    procGetSaveFileNameW         = comdlg32.NewProc("GetSaveFileNameW")\n    procGetOpenFileNameW         = comdlg32.NewProc("GetOpenFileNameW")\n)'''
 if old not in s: raise SystemExit('proc vars não localizadas')
 s=s.replace(old,new,1)
 
-# Estrutura Win32 OPENFILENAMEW.
 anchor='type rect struct{ Left, Top, Right, Bottom int32 }\n'
 struct=r'''type openFileNameW struct {
     LStructSize       uint32
@@ -39,9 +36,9 @@ struct=r'''type openFileNameW struct {
     NMaxFileTitle     uint32
     LpstrInitialDir   *uint16
     LpstrTitle        *uint16
-    Flags              uint32
-    NFileOffset        uint16
-    NFileExtension     uint16
+    Flags             uint32
+    NFileOffset       uint16
+    NFileExtension    uint16
     LpstrDefExt       *uint16
     LCustData          uintptr
     LpfnHook           uintptr
@@ -54,6 +51,40 @@ struct=r'''type openFileNameW struct {
 '''
 if anchor not in s: raise SystemExit('rect não localizado')
 s=s.replace(anchor,struct+anchor,1)
+
+# O token temporário mantém o caminho do PFX fora do frontend.
+anchor='''type windowCandidate struct {'''
+if anchor not in s: raise SystemExit('windowCandidate não localizado')
+s=s.replace(anchor,'''var fiscalCertificateSelections sync.Map\n\n'''+anchor,1)
+
+# Estende request de validação criado pelo patch do certificate manager.
+old='type fiscalCertificateValidateRequest struct { ID string `json:"id"`; Path string `json:"path"`; Password string `json:"password"` }'
+new='type fiscalCertificateValidateRequest struct { ID string `json:"id"`; Token string `json:"token"`; Path string `json:"path"`; Password string `json:"password"` }'
+if old not in s: raise SystemExit('fiscalCertificateValidateRequest não localizado')
+s=s.replace(old,new,1)
+
+# Faz o validate resolver token opaco para path somente dentro do broker.
+old=r'''    req.ID = strings.TrimSpace(req.ID)
+    req.Path = strings.TrimSpace(req.Path)
+    if req.ID == "" && req.Path == "" { http.Error(w, "certificate id required", http.StatusBadRequest); return }
+    args := []string{"cert", "validate"}
+    if req.ID != "" { args = append(args, "--id", req.ID) } else { args = append(args, "--path", req.Path) }
+    out, err := b.runFiscalCoreWithInput(req.Password, args...)'''
+new=r'''    req.ID = strings.TrimSpace(req.ID)
+    req.Token = strings.TrimSpace(req.Token)
+    req.Path = strings.TrimSpace(req.Path)
+    if req.Token != "" {
+        if raw, ok := fiscalCertificateSelections.Load(req.Token); ok {
+            if selected, ok := raw.(string); ok { req.Path = selected }
+        }
+    }
+    if req.ID == "" && req.Path == "" { http.Error(w, "certificate id required", http.StatusBadRequest); return }
+    args := []string{"cert", "validate"}
+    if req.ID != "" { args = append(args, "--id", req.ID) } else { args = append(args, "--path", req.Path) }
+    out, err := b.runFiscalCoreWithInput(req.Password, args...)
+    if req.Token != "" && err == nil { fiscalCertificateSelections.Delete(req.Token) }'''
+if old not in s: raise SystemExit('validate handler esperado não localizado')
+s=s.replace(old,new,1)
 
 anchor='''func (b *broker) handleFiscalManifest(w http.ResponseWriter, r *http.Request) {'''
 if anchor not in s: raise SystemExit('handleFiscalManifest ausente')
@@ -84,14 +115,41 @@ func cachedNFePath(key string) (string, error) {
 func chooseXMLSavePath(defaultName string) (string, bool) {
     runtime.LockOSThread(); defer runtime.UnlockOSThread()
     var file [4096]uint16
-    initial, _ := syscall.UTF16FromString(defaultName)
-    copy(file[:], initial)
+    initial, _ := syscall.UTF16FromString(defaultName); copy(file[:], initial)
     title, _ := syscall.UTF16PtrFromString("Salvar XML oficial da NF-e")
     ext, _ := syscall.UTF16PtrFromString("xml")
     ofn := openFileNameW{LStructSize:uint32(unsafe.Sizeof(openFileNameW{})), LpstrFile:&file[0], NMaxFile:uint32(len(file)), LpstrTitle:title, LpstrDefExt:ext, Flags:0x00000002|0x00000800|0x00000008}
     ret,_,_ := procGetSaveFileNameW.Call(uintptr(unsafe.Pointer(&ofn)))
     if ret == 0 { return "", false }
     return syscall.UTF16ToString(file[:]), true
+}
+
+func chooseCertificateFile() (string, bool) {
+    runtime.LockOSThread(); defer runtime.UnlockOSThread()
+    var file [4096]uint16
+    title, _ := syscall.UTF16PtrFromString("Selecionar certificado digital A1 (.pfx/.p12)")
+    ofn := openFileNameW{LStructSize:uint32(unsafe.Sizeof(openFileNameW{})), LpstrFile:&file[0], NMaxFile:uint32(len(file)), LpstrTitle:title, Flags:0x00001000|0x00000800|0x00000008}
+    ret,_,_ := procGetOpenFileNameW.Call(uintptr(unsafe.Pointer(&ofn)))
+    if ret == 0 { return "", false }
+    path:=syscall.UTF16ToString(file[:])
+    ext:=strings.ToLower(filepath.Ext(path)); if ext!=".pfx" && ext!=".p12" { return "", false }
+    return path,true
+}
+
+func safeCertificateDisplayName(path string) string {
+    ext:=filepath.Ext(path); base:=strings.TrimSuffix(filepath.Base(path),ext)
+    if i:=strings.LastIndex(base," - "); i>0 { base=strings.TrimSpace(base[:i]) }
+    return base+ext
+}
+
+func (b *broker) handleFiscalCertificatePick(w http.ResponseWriter, r *http.Request) {
+    if !setFiscalCORS(w,r) { return }
+    if r.Method==http.MethodOptions { w.WriteHeader(http.StatusNoContent); return }
+    if r.Method!=http.MethodPost { http.Error(w,"method not allowed",http.StatusMethodNotAllowed); return }
+    path,ok:=chooseCertificateFile(); if !ok { w.Header().Set("Content-Type","application/json"); _=json.NewEncoder(w).Encode(map[string]any{"ok":false,"cancelled":true}); return }
+    token:=fmt.Sprintf("cert-%d",time.Now().UnixNano()); fiscalCertificateSelections.Store(token,path)
+    w.Header().Set("Content-Type","application/json; charset=utf-8")
+    _=json.NewEncoder(w).Encode(map[string]any{"ok":true,"token":token,"file_name":safeCertificateDisplayName(path)})
 }
 
 func (b *broker) handleFiscalOpenCached(w http.ResponseWriter, r *http.Request) {
@@ -127,11 +185,11 @@ func (b *broker) handleFiscalExportXML(w http.ResponseWriter, r *http.Request) {
 s=s.replace(anchor,insert+anchor,1)
 
 old='''    mux.HandleFunc("/fiscal/nfe/manifestar", b.handleFiscalManifest)'''
-new='''    mux.HandleFunc("/fiscal/nfe/manifestar", b.handleFiscalManifest)\n    mux.HandleFunc("/fiscal/nfe/open-cached", b.handleFiscalOpenCached)\n    mux.HandleFunc("/fiscal/nfe/export-xml", b.handleFiscalExportXML)'''
+new='''    mux.HandleFunc("/fiscal/nfe/manifestar", b.handleFiscalManifest)\n    mux.HandleFunc("/fiscal/nfe/open-cached", b.handleFiscalOpenCached)\n    mux.HandleFunc("/fiscal/nfe/export-xml", b.handleFiscalExportXML)\n    mux.HandleFunc("/fiscal/certificate/pick", b.handleFiscalCertificatePick)'''
 if old not in s: raise SystemExit('rota manifestar ausente')
 s=s.replace(old,new,1)
-s=s.rstrip()+"\n// "+MARK+" — reabertura do cache e Save As nativo do XML oficial.\n"
-for tok in (MARK,'/fiscal/nfe/open-cached','/fiscal/nfe/export-xml','GetSaveFileNameW','cachedNFePath','os.WriteFile(dst,raw'):
+s=s.rstrip()+"\n// "+MARK+" — cache, Save As XML e seletor PFX por token opaco.\n"
+for tok in (MARK,'/fiscal/nfe/open-cached','/fiscal/nfe/export-xml','/fiscal/certificate/pick','GetSaveFileNameW','GetOpenFileNameW','cachedNFePath','fiscalCertificateSelections'):
     if tok not in s: raise SystemExit('Ações NF-e incompletas: '+tok)
 p.write_text(s,encoding='utf-8',newline='\n')
-print('3.13.0: abrir cache e Salvar XML nativo adicionados.')
+print('3.13.0: cache, Salvar XML e seletor nativo de A1 adicionados.')
