@@ -49,7 +49,6 @@ func (b *broker) handleFiscalManifest(w http.ResponseWriter, r *http.Request) {
 '''
 s=s.replace(anchor,insert+anchor,1)
 
-# Reusa helper de queue para a consulta normal, evitando divergência entre consultar/manifestar.
 old=r'''    // Se o Web Service oficial entregou o XML completo, encaminha o mesmo
     // arquivo para o pipeline normal de abas do Visualizador.
     var result map[string]any
@@ -70,8 +69,8 @@ new='''    mux.HandleFunc("/fiscal/nfe/consultar", b.handleFiscalConsult)\n    m
 if old not in s: raise SystemExit('rota consultar ausente no mux')
 s=s.replace(old,new,1)
 
+s=s.rstrip()+"\n// "+MARK+" — Ciência 210210 protegida e XML encaminhado ao Visualizador.\n"
 for tok in (MARK,'/fiscal/nfe/manifestar','handleFiscalManifest','req.Event != "210210"','"manifest", "--key", req.Key','"--event", "210210"','queueXMLFromFiscalResult'):
     if tok not in s: raise SystemExit('Manifestação broker incompleta: '+tok)
-s=s.rstrip()+"\n// "+MARK+" — Ciência 210210 protegida e XML encaminhado ao Visualizador.\n"
 p.write_text(s,encoding='utf-8',newline='\n')
 print('3.13.0: Ciência da Operação conectada ao broker local.')
