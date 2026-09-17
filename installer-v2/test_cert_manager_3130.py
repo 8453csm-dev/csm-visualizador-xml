@@ -10,8 +10,12 @@ SRC = ROOT / 'installer-v2' / 'launcher' / 'csm_fiscal_core.cs'
 
 
 def run(cmd, **kwargs):
-    p = subprocess.run(cmd, text=True, capture_output=True, **kwargs)
-    return p
+    return subprocess.run(cmd, text=True, capture_output=True, **kwargs)
+
+
+def winpath(value):
+    value = str(value).replace('\\\\', '\\')
+    return os.path.normcase(os.path.normpath(value))
 
 
 def compile_core(out):
@@ -62,21 +66,21 @@ def main():
 
         rc, data, raw = jrun(exe, ['folders', 'add', '--path', str(certdir)], env)
         assert data.get('ok') is True, data
-        assert str(certdir) in data.get('folders', []), data
+        assert winpath(certdir) in {winpath(x) for x in data.get('folders', [])}, data
 
         rc, data, raw = jrun(exe, ['scan'], env)
         assert data.get('ok') is True, data
         assert '1234' not in raw, 'senha candidata vazou no JSON'
         certs = data.get('certificates') or []
-        assert any(str(fake).lower() == str(c.get('path','')).lower() for c in certs), certs
-        found = next(c for c in certs if str(fake).lower() == str(c.get('path','')).lower())
+        assert any(winpath(fake) == winpath(c.get('path','')) for c in certs), certs
+        found = next(c for c in certs if winpath(fake) == winpath(c.get('path','')))
         assert found.get('status') in ('Senha necessária', 'Arquivo inválido'), found
         forbidden = {'password', 'senha', 'password_dpapi_b64'}
         assert not (forbidden & set(found.keys())), found
 
         rc, data, raw = jrun(exe, ['folders', 'remove', '--path', str(certdir)], env)
         assert data.get('ok') is True
-        assert str(certdir) not in data.get('folders', []), data
+        assert winpath(certdir) not in {winpath(x) for x in data.get('folders', [])}, data
 
         print('OK - registro de pastas, scan recursivo e sanitização de senha validados.')
 
