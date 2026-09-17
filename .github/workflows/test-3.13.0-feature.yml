@@ -37,10 +37,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Aplicar broker fiscal existente 3.12.0
+      - name: Aplicar broker fiscal + certificados 3.13.0
         shell: pwsh
         run: |
           python installer-v2/patch_launcher_fiscal_core_3120.py
+          python installer-v2/patch_launcher_cert_manager_3130.py
       - name: Testar endpoints de certificados 3.13.0
         shell: pwsh
         run: |
