@@ -15,17 +15,29 @@ field_new='''    private static bool _captchaLogged;\n    private static Automat
 if field_anchor not in s: raise RuntimeError('Campo _captchaLogged não encontrado')
 s=s.replace(field_anchor,field_new,1)
 
-# Guarde a janela encontrada para continuar usando o mesmo AutomationElement
-# mesmo depois de ocultá-la (janelas ocultas podem deixar de aparecer no RootElement).
+# Detecta a nova janela com baixa latência para que, na prática, ela não fique
+# visível como uma segunda tela. Depois mantemos o AutomationElement salvo.
+old_wait_loop='''        while (DateTime.UtcNow < until) { var w = FindLookupWindow(); if (w != null) return w; Thread.Sleep(250); }'''
+new_wait_loop='''        while (DateTime.UtcNow < until) { var w = FindLookupWindow(); if (w != null) return w; Thread.Sleep(35); }'''
+if old_wait_loop not in s: raise RuntimeError('Polling de WaitForLookupWindow não encontrado')
+s=s.replace(old_wait_loop,new_wait_loop,1)
+
 old_wait='''            var win = WaitForLookupWindow(TimeSpan.FromSeconds(45));\n            if (win == null) { Log("Janela Consulta DANFE não encontrada."); return 11; }'''
-new_wait='''            var win = WaitForLookupWindow(TimeSpan.FromSeconds(45));\n            if (win == null) { Log("Janela Consulta DANFE não encontrada."); return 11; }\n            _managedLookupWindow = win;'''
+new_wait='''            var win = WaitForLookupWindow(TimeSpan.FromSeconds(45));\n            if (win == null) { Log("Janela Consulta DANFE não encontrada."); return 11; }\n            _managedLookupWindow = win;\n            HideLookupWindow(win);'''
 if old_wait not in s: raise RuntimeError('Abertura da janela de consulta não encontrada')
 s=s.replace(old_wait,new_wait,1)
 
-# Só ocultamos depois de preencher a chave e acionar a consulta, para manter
-# os fallbacks de teclado disponíveis na etapa inicial.
+# ValuePattern funciona sem mostrar a janela. Somente se for necessário o
+# fallback por teclado, revelamos por instantes e ocultamos novamente.
+old_key_fallback='''            try { c.Item1.SetFocus(); Thread.Sleep(80); SendKeys.SendWait("^a"); SendKeys.SendWait(key); Thread.Sleep(100); Log("Chave preenchida via foco/teclado como fallback."); return true; }\n            catch { }'''
+new_key_fallback='''            try\n            {\n                RevealLookupWindow(win);\n                c.Item1.SetFocus(); Thread.Sleep(80); SendKeys.SendWait("^a"); SendKeys.SendWait(key); Thread.Sleep(100);\n                Log("Chave preenchida via foco/teclado como fallback temporariamente visível."); return true;\n            }\n            catch { }\n            finally { HideLookupWindow(win); }'''
+if old_key_fallback not in s: raise RuntimeError('Fallback de teclado da chave não encontrado')
+s=s.replace(old_key_fallback,new_key_fallback,1)
+
+# Primeiro tenta acionar a busca com UI Automation enquanto oculto. Só revela
+# se o site não expuser InvokePattern e precisar do fallback manual do Windows.
 search_anchor='''            if (!TryInvokeSearch(win)) { Log("Botão de consulta não foi localizado via UI Automation."); return 13; }\n'''
-search_new='''            if (!TryInvokeSearch(win)) { Log("Botão de consulta não foi localizado via UI Automation."); return 13; }\n            HideLookupWindow(win);\n'''
+search_new='''            if (!TryInvokeSearch(win))\n            {\n                RevealLookupWindow(win);\n                var retried = TryInvokeSearch(win);\n                HideLookupWindow(win);\n                if (!retried) { Log("Botão de consulta não foi localizado via UI Automation."); return 13; }\n            }\n            HideLookupWindow(win);\n'''
 if search_anchor not in s: raise RuntimeError('Acionamento da consulta não encontrado')
 s=s.replace(search_anchor,search_new,1)
 
@@ -33,7 +45,6 @@ s=s.replace(search_anchor,search_new,1)
 old_loop='''                win = FindLookupWindow();\n                if (win == null) { Log("Janela de consulta foi fechada antes do XML."); return 14; }'''
 new_loop='''                win = _managedLookupWindow;\n                if (!IsLookupWindowAlive(win)) { Log("Janela de consulta foi encerrada antes do XML."); return 14; }'''
 if old_loop not in s:
-    # compatibilidade caso algum patch anterior ainda use a mensagem antiga
     old_loop='''                win = FindLookupWindow();\n                if (win == null) { Log("Janela de consulta foi fechada antes do download."); return 14; }'''
 if old_loop not in s: raise RuntimeError('Loop da consulta não encontrado')
 s=s.replace(old_loop,new_loop,1)
@@ -50,8 +61,7 @@ for needle in [
     'var dlg = FindTopWindowByName("salvar como", "save as");\n        if (dlg == null) return false;'
 ]:
     if needle in s:
-        repl=needle+'\n        HideLookupWindow(dlg);'
-        s=s.replace(needle,repl,1)
+        s=s.replace(needle,needle+'\n        HideLookupWindow(dlg);',1)
 
 # Feche a janela externa em qualquer saída normal/erro. Se apareceu CAPTCHA,
 # ela permanece disponível ao usuário para a intervenção necessária.
@@ -60,7 +70,7 @@ new_catch='''        catch (Exception ex) { Log("Erro não tratado: " + ex.GetTy
 if old_catch not in s: raise RuntimeError('Final do Main não encontrado')
 s=s.replace(old_catch,new_catch,1)
 
-for tok in (MARKER,'ShowWindow','SW_HIDE','IsLookupWindowAlive','HideLookupWindow(win)','CloseLookupWindow(_managedLookupWindow)','janela exibida somente para intervenção manual'):
+for tok in (MARKER,'Thread.Sleep(35)','HideLookupWindow(win)','SW_HIDE','IsLookupWindowAlive','CloseLookupWindow(_managedLookupWindow)','janela exibida somente para intervenção manual'):
     if tok not in s: raise SystemExit('Patch hidden 3.11.5 incompleto: '+tok)
 p.write_text(s,encoding='utf-8',newline='\n')
-print('3.11.5: site do provedor roda oculto; janela só aparece em CAPTCHA e fecha automaticamente ao terminar.')
+print('3.11.5: provedor é ocultado assim que a janela nasce; só aparece se houver fallback manual/CAPTCHA e fecha ao terminar.')
