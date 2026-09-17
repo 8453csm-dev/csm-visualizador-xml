@@ -1,0 +1,93 @@
+name: Teste Consulta NF-e Nativa
+
+on:
+  push:
+    branches: ["feature/consulta-nfe-chave-nativa"]
+    paths:
+      - "installer-v2/native_nfe_lookup.js"
+      - "installer-v2/native_nfe_lookup.css"
+      - "installer-v2/patch_native_nfe_lookup_web.py"
+      - "installer-v2/patch_launcher_native_nfe_lookup.py"
+      - "installer-v2/launcher/native_nfe_lookup_windows.go"
+      - "installer-v2/launcher/native_nfe_lookup_windows_test.go"
+      - ".github/workflows/test-native-nfe-lookup.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validar arquivos da interface
+        shell: pwsh
+        run: |
+          node --check installer-v2/native_nfe_lookup.js
+          if($LASTEXITCODE -ne 0){throw "JavaScript da consulta NF-e invalido"}
+          python -m py_compile installer-v2/patch_native_nfe_lookup_web.py installer-v2/patch_launcher_native_nfe_lookup.py
+          if($LASTEXITCODE -ne 0){throw "Patch Python da consulta NF-e invalido"}
+
+      - name: Montar launcher com consulta NF-e nativa
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          if($LASTEXITCODE -ne 0){throw "Patch de instancia unica falhou"}
+          python installer-v2/patch_launcher_lookup.py
+          if($LASTEXITCODE -ne 0){throw "Patch do Localizador atual falhou"}
+          python installer-v2/patch_launcher_395.py
+          if($LASTEXITCODE -ne 0){throw "Patch do launcher 3.9.5 falhou"}
+          python installer-v2/patch_launcher_fresh_core_3102.py
+          if($LASTEXITCODE -ne 0){throw "Patch Fresh Core falhou"}
+          python installer-v2/patch_launcher_native_nfe_lookup.py
+          if($LASTEXITCODE -ne 0){throw "Patch da consulta NF-e nativa falhou"}
+          Get-ChildItem installer-v2/launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
+          $env:GOOS='windows';$env:GOARCH='amd64';$env:CGO_ENABLED='0';$env:GO111MODULE='off'
+          Push-Location installer-v2/launcher
+          try {
+            go test .
+            if($LASTEXITCODE -ne 0){throw "Testes Go da consulta NF-e falharam"}
+            go build -trimpath -ldflags="-H windowsgui -s -w" -o "$env:TEMP\csm-native-nfe-launcher.exe" .
+            if($LASTEXITCODE -ne 0){throw "Launcher com consulta NF-e nao compilou"}
+          } finally { Pop-Location }
+
+      - name: Validar injecao no payload web real
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+          if($LASTEXITCODE -ne 0){throw "Falha ao baixar base 3.7.8"}
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "temp/payload"
+          if($LASTEXITCODE -ne 0){throw "Falha ao extrair payload"}
+          python installer-v2/patch_runtime.py "temp/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Patch runtime falhou"}
+          python installer-v2/patch_lookup_order.py
+          if($LASTEXITCODE -ne 0){throw "Patch de ordem do Localizador falhou"}
+          python installer-v2/patch_native_nfe_lookup_web.py "temp/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Patch web da consulta NF-e falhou"}
+          node --check "temp/payload/_internal/web/native_nfe_lookup.js"
+          if($LASTEXITCODE -ne 0){throw "JavaScript instalado no payload invalido"}
+          $index=Get-Content "temp/payload/_internal/web/index.html" -Raw
+          foreach($token in @('native_nfe_lookup.css','native_nfe_lookup.js','http://127.0.0.1:47878')){if(!$index.Contains($token)){throw "Payload final sem $token"}}
+
+      - name: Resultado
+        shell: pwsh
+        run: |
+          Write-Host "Consulta NF-e nativa validada sem chamada real a provedor pago."
