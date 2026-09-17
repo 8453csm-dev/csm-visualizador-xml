@@ -17,7 +17,8 @@ info.update({
   'build':'CSM Fiscal Core 3.12.1 - SOAP NF-e 4.00 corrigido + cUFAutor na Distribuicao DF-e',
   'nfe_consulta_protocolo_soap_contract_fixed':True,
   'nfe_distribuicao_dfe_cufautor':True,
-  'native_fiscal_core':'3.12.1'
+  'native_fiscal_core':True,
+  'native_fiscal_core_version':'3.12.1'
 })
 info_path.write_text(json.dumps(info,ensure_ascii=False,indent=2),encoding='utf-8',newline='\n')
 root=web.parent.parent
