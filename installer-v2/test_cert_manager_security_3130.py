@@ -73,8 +73,9 @@ def main():
         assert 'path' not in c,c
         assert '1234' not in raw,'senha do nome do arquivo vazou na API publica'
         assert c.get('has_protected_credential') is True,c
-        status=ascii_text(c.get('status'))
-        assert status.startswith('val') or status.startswith('vencendo'),c
+        assert c.get('available') is True,c
+        assert int(c.get('days_remaining') or 0) > 0,c
+        assert c.get('expiry'),c
         idx=local/'CSM Visualizador XML'/'certificados'/'certificados.json'
         stored=idx.read_text(encoding='utf-8')
         parsed=json.loads(stored); row=parsed[0]
