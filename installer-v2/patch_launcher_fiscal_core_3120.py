@@ -21,7 +21,7 @@ func fiscalOriginAllowed(r *http.Request) bool {
     origin := strings.TrimSpace(r.Header.Get("Origin"))
     if origin == "" || origin == "null" { return true }
     low := strings.ToLower(origin)
-    return strings.HasPrefix(low, "file://") || strings.HasPrefix(low, "http://127.0.0.1") || strings.HasPrefix(low, "http://localhost") || strings.HasPrefix(low, "https://127.0.0.1") || strings.HasPrefix(low, "https://localhost")
+    return strings.HasPrefix(low, "file://") || strings.HasPrefix(low, "http://127.0.0.1") || strings.HasPrefix(low, "http://localhost") || strings.HasPrefix(low, "https://127.0.0.1") || strings.HasPrefix(low, "https://localhost") || low == "https://pywebview.local" || low == "http://pywebview.local"
 }
 
 func setFiscalCORS(w http.ResponseWriter, r *http.Request) bool {
@@ -107,7 +107,7 @@ s=s.replace(mux,'''    mux.HandleFunc("/fiscal/certificates", b.handleFiscalCert
     mux.HandleFunc("/fiscal/nfe/consultar", b.handleFiscalConsult)
     mux.HandleFunc("/health", b.handleHealth)''',1)
 
-for token in (MARKER,'/fiscal/certificates','/fiscal/nfe/consultar','CSM Fiscal Core.exe','fiscalOriginAllowed','handleFiscalConsult'):
+for token in (MARKER,'/fiscal/certificates','/fiscal/nfe/consultar','CSM Fiscal Core.exe','fiscalOriginAllowed','handleFiscalConsult','pywebview.local'):
     if token not in s: raise SystemExit('Patch do broker fiscal incompleto: '+token)
 p.write_text(s,encoding='utf-8',newline='\n')
 print('3.12.0: broker local conectado ao CSM Fiscal Core nativo; navegador removido do fluxo principal.')
