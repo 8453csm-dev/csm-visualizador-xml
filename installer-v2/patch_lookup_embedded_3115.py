@@ -13,12 +13,26 @@ if MARKER in s:
     raise SystemExit(0)
 
 # O broker já entrega o XML ao app. Emita um evento para o modal saber quando
-# a consulta terminou de verdade, em vez de fechar 1s após iniciar.
-old="async function openExternalDocument(path){\n path=String(path||'').trim();if(!path)return;\n try{await waitApi();const result=await window.pywebview.api.open_recent(path);handleLoadResult(result);await acknowledgeExternalDocument(path)}catch(e){toast(`Não foi possível abrir ${path.split(/[\\\\/]/).pop()||'o XML'}: ${e?.message||e}`,true)}\n}"
-new="async function openExternalDocument(path){\n path=String(path||'').trim();if(!path)return;\n try{await waitApi();const result=await window.pywebview.api.open_recent(path);handleLoadResult(result);window.dispatchEvent(new CustomEvent('csm:external-document-opened',{detail:{path,result}}));await acknowledgeExternalDocument(path)}catch(e){toast(`Não foi possível abrir ${path.split(/[\\\\/]/).pop()||'o XML'}: ${e?.message||e}`,true)}\n}"
-if old not in s:
+# a consulta terminou de verdade. Substituímos a função por limites, porque a
+# 3.11.2 acrescenta o toast de situação dentro dela.
+open_start=s.find('async function openExternalDocument(path){')
+open_end=s.find('\nfunction setupExternalOpenBridge(){',open_start)
+if open_start<0 or open_end<0:
     raise SystemExit('openExternalDocument esperado não encontrado')
-s=s.replace(old,new,1)
+new_open=r'''async function openExternalDocument(path){
+ path=String(path||'').trim();if(!path)return;
+ try{
+  await waitApi();
+  const result=await window.pywebview.api.open_recent(path);
+  handleLoadResult(result);
+  window.dispatchEvent(new CustomEvent('csm:external-document-opened',{detail:{path,result}}));
+  await acknowledgeExternalDocument(path);
+  const file=(path.split(/[\\/]/).pop()||''),m=file.match(/ - (AUTORIZADA|CANCELADA|DENEGADA|ENCONTRADA) - /i);
+  if(m){const st=m[1].toUpperCase(),bad=st==='CANCELADA'||st==='DENEGADA';toast(`NF-e consultada: ${st}`,bad)}
+ }catch(e){toast(`Não foi possível abrir ${path.split(/[\\/]/).pop()||'o XML'}: ${e?.message||e}`,true)}
+} // CSM_LOOKUP_STATUS_TOAST_3112 + CSM_LOOKUP_EMBEDDED_3115
+'''
+s=s[:open_start]+new_open+s[open_end:]
 
 # Troca o botão flutuante da 3.11.4 por um botão real da barra superior.
 start=s.find('// CSM_NATIVE_LOOKUP_FIXED_BUTTON_3114')
