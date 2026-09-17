@@ -12,7 +12,7 @@ const required=[
  '/fiscal/certificates/scan',
  '/fiscal/certificate/pick',
  '/fiscal/certificate/validate',
- 'Registrar Ciência',
+ 'Ciência da Operação (210210)',
  'Salvar XML',
  'DANFE / PDF',
  'EMPRESA - SENHA.pfx'
