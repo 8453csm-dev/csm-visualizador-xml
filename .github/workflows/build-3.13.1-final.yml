@@ -1,0 +1,210 @@
+name: Build CSM Visualizador XML 3.13.1 Final
+
+on:
+  push:
+    branches: ["feature/nfe-certificados-integrados"]
+    paths:
+      - "installer-v2/**"
+      - ".github/workflows/build-3.13.1-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: false
+
+      - name: Baixar base estável 3.7.8
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path temp | Out-Null
+          gh release download v3.7.8 --repo 8453csm-dev/csm-visualizador-xml --pattern "CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" --dir temp
+          if($LASTEXITCODE -ne 0){throw "Falha ao baixar base 3.7.8"}
+
+      - name: Montar payload completo 3.13.1
+        shell: pwsh
+        run: |
+          python installer-v2/extract_payload.py "temp/CSMVisualizadorXML-3.7.8-Instalador-Completo.exe" "installer-completo/enhancer_v8.html" "installer-v2/payload"
+          python installer-v2/patch_runtime.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_lookup_order.py
+          python installer-v2/patch_devolution_engine.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_tax_explainer.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_tax_explainer_entrypoint_v2.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_difal_st.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_difal_display_3102.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_folder_import_progress.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_folder_import_progress_v2.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_folder_import_progress_v3.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_native_lookup_action_3111.py
+          python installer-v2/patch_native_lookup_3110.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_native_lookup_visibility_3113.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_lookup_status_toast_3112.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_native_lookup_core_3114.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_release_identity_3114.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          python installer-v2/patch_lookup_embedded_3115.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_release_identity_3115.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          python installer-v2/patch_native_fiscal_core_3120.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_release_identity_3120.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          python installer-v2/patch_release_identity_3121.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          python installer-v2/patch_native_nfe_workflow_3130.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_native_nfe_issuer_3131.py "installer-v2/payload/_internal/web"
+          python installer-v2/patch_release_identity_3130.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          python installer-v2/patch_release_identity_3131.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
+          if($LASTEXITCODE -ne 0){throw "Montagem 3.13.1 falhou"}
+          python installer-v2/patch_tax_explainer.py --extract temp/taxsrc
+          Copy-Item installer-v2/tax_explainer_entrypoint_v2.js temp/taxsrc/tax_explainer_entrypoint_v2.js -Force
+          $app=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          Copy-Item $app temp/app-3130.mjs -Force
+          node --check temp/app-3130.mjs
+          if($LASTEXITCODE -ne 0){throw "app.js final inválido"}
+          $bi=Get-Content "installer-v2/payload/_internal/csm/build-info.json" -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.13.1' -or !$bi.certificate_folder_manager -or !$bi.nfe_manifestacao_ciencia_210210 -or !$bi.nfe_xml_export_preserves_official_bytes -or !$bi.nfe_issuer_local_xml_sources -or !$bi.nfe_native_workflow_3131 -or $bi.native_key_lookup_browser_flow){throw "Build-info 3.13.1 incorreto"}
+
+      - name: Testar interface e módulos fiscais
+        shell: pwsh
+        run: |
+          npm install --no-save jsdom@26.1.0
+          $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          $env:CSM_CSS=(Resolve-Path "installer-v2/payload/_internal/web/refinement.css").Path
+          node installer-v2/test_native_fiscal_core_3120.js
+          node installer-v2/test_native_nfe_workflow_3130.js
+          node installer-v2/test_native_nfe_issuer_3131.js
+          node installer-v2/test_folder_import_progress_v3.js
+          node installer-v2/test_difal_st.js
+          node installer-v2/test_difal_display_3102.js
+          node installer-v2/test_devolution_engine.js
+          node installer-v2/test_devolution_engine_v3.js
+          node installer-v2/test_devolution_entrypoint_v4.js
+          $env:CSM_TAX_CORE=(Resolve-Path temp/taxsrc/tax_engine_core.js).Path
+          $env:CSM_TAX_UI=(Resolve-Path temp/taxsrc/tax_explainer_ui.js).Path
+          $env:CSM_TAX_ENTRY=(Resolve-Path temp/taxsrc/tax_explainer_entrypoint_v2.js).Path
+          node installer-v2/test_tax_engine.js
+          node installer-v2/test_tax_ui.js
+          node installer-v2/test_tax_no_freeze.js
+          node installer-v2/test_tax_entrypoint_v2.js
+          if($LASTEXITCODE -ne 0){throw "Regressão nos módulos existentes"}
+
+      - name: Preparar launcher e Fiscal Core 3.13.1
+        shell: pwsh
+        run: |
+          python installer-v2/patch_launcher_single_instance.py
+          python installer-v2/patch_launcher_lookup.py
+          python installer-v2/patch_launcher_395.py
+          python installer-v2/patch_launcher_fresh_core_3102.py
+          python installer-v2/patch_lookup_delivery_3112.py
+          python installer-v2/patch_lookup_save_dialog_3112.py
+          python installer-v2/patch_lookup_status_tag_3112.py
+          python installer-v2/patch_lookup_dialog_3114.py
+          python installer-v2/patch_lookup_hidden_window_3115.py
+          python installer-v2/patch_launcher_postinstall_fresh_3112.py
+          python installer-v2/patch_launcher_fiscal_core_3120.py
+          python installer-v2/patch_launcher_cert_manager_3130.py
+          python installer-v2/patch_launcher_manifestacao_3130.py
+          python installer-v2/patch_launcher_nfe_actions_3130.py
+          python installer-v2/patch_launcher_issuer_local_3131.py
+          python installer-v2/test_launcher_cert_manager_3130.py
+          python installer-v2/patch_fiscal_core_3121.py
+          python installer-v2/patch_fiscal_core_cert_manager_3130.py
+          python installer-v2/patch_cert_manager_paths_3130.py
+          python installer-v2/patch_cert_manager_credential_manager_3130.py
+          python installer-v2/patch_cert_manager_public_ids_3130.py
+          python installer-v2/patch_fiscal_core_manifestacao_3130.py
+          python installer-v2/patch_fiscal_core_issuer_3131.py
+          python installer-v2/test_fiscal_core_soap_3121.py
+          python installer-v2/test_manifestacao_3130.py
+          python installer-v2/test_issuer_flow_3131.py
+          python installer-v2/test_cert_manager_3130.py
+          python installer-v2/test_cert_manager_security_3130.py
+          if($LASTEXITCODE -ne 0){throw "Patches/testes Fiscal Core 3.13.1 falharam"}
+          Get-ChildItem installer-v2/launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
+          New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
+          $fx=Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319";$csc=Join-Path $fx "csc.exe"
+          $fiscalSource=(Resolve-Path "installer-v2/launcher/csm_fiscal_core.cs").Path
+          $fiscal=(Join-Path (Resolve-Path "installer-v2/payload/_internal/csm").Path "CSM Fiscal Core.exe")
+          & $csc /nologo /target:exe /optimize+ /platform:x64 "/out:$fiscal" "/reference:$(Join-Path $fx 'System.Web.Extensions.dll')" "/reference:$(Join-Path $fx 'System.Security.dll')" "/reference:$(Join-Path $fx 'System.Xml.dll')" "/reference:$(Join-Path $fx 'System.Xml.Linq.dll')" $fiscalSource
+          if($LASTEXITCODE -ne 0 -or !(Test-Path $fiscal)){throw "CSM Fiscal Core 3.13.1 não compilou"}
+          $fst=Start-Process $fiscal -ArgumentList 'selftest' -Wait -PassThru -WindowStyle Hidden
+          if($fst.ExitCode -ne 0){throw "Self-test do Fiscal Core falhou: $($fst.ExitCode)"}
+          $legacySource=(Resolve-Path "installer-v2/launcher/consulta_danfe_helper.cs").Path
+          $legacy=(Join-Path (Resolve-Path "installer-v2/payload/_internal/csm").Path "CSM Consulta DANFE Helper.exe")
+          & $csc /nologo /target:winexe /optimize+ /platform:x64 "/out:$legacy" "/reference:$(Join-Path $fx 'WPF/UIAutomationClient.dll')" "/reference:$(Join-Path $fx 'WPF/UIAutomationTypes.dll')" "/reference:$(Join-Path $fx 'System.Windows.Forms.dll')" "/reference:$(Join-Path $fx 'System.Xml.Linq.dll')" $legacySource
+          if($LASTEXITCODE -ne 0){throw "Helper legado não compilou"}
+          $original="installer-v2/payload/CSM Visualizador XML.exe";$core="installer-v2/payload/CSM Visualizador XML Core.exe";$icon=(Resolve-Path "installer-v2/payload/_internal/assets/CSMVisualizadorXML.ico").Path
+          Move-Item -Force $original $core
+          go install github.com/akavel/rsrc@v0.10.2
+          $rsrc=Join-Path (go env GOPATH) "bin/rsrc.exe";& $rsrc -arch amd64 -ico $icon -o "installer-v2/launcher/rsrc_windows_amd64.syso"
+          $env:GOOS='windows';$env:GOARCH='amd64';$env:CGO_ENABLED='0';$env:GO111MODULE='off'
+          Push-Location installer-v2/launcher
+          try{go build -trimpath -ldflags="-H windowsgui -s -w" -o "../payload/CSM Visualizador XML.exe" .;if($LASTEXITCODE -ne 0){throw "Launcher não compilou"}}finally{Pop-Location}
+          $self=Start-Process "installer-v2/payload/CSM Visualizador XML.exe" -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Self-test launcher falhou"}
+
+      - name: Compilar instalador 3.13.1
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python installer-v2/make_brand.py
+          python installer-v2/prepare_release_3114.py
+          python installer-v2/prepare_release_3115.py
+          python installer-v2/prepare_release_3120.py
+          python installer-v2/prepare_release_3121.py
+          python installer-v2/prepare_release_3130.py
+          python installer-v2/prepare_release_3131.py
+          if($LASTEXITCODE -ne 0){throw "Preparação do instalador falhou"}
+          $path="installer-v2/CSMVisualizadorXML.iss";$text=Get-Content $path -Raw;$text=[regex]::Replace($text,'(?m)^UninstallDisplayVersion=.*\r?\n','');[IO.File]::WriteAllText((Resolve-Path $path),$text,[Text.UTF8Encoding]::new($false))
+          $iscc="C:/Program Files (x86)/Inno Setup 6/ISCC.exe";if(!(Test-Path $iscc)){choco install innosetup -y --no-progress}
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $iscc "installer-v2/CSMVisualizadorXML.iss"
+          if($LASTEXITCODE -ne 0){throw "Compilação falhou"}
+          $base="dist/CSMVisualizadorXML-3.13.1-Instalador-Completo.exe";if(!(Test-Path $base)){throw "EXE não gerado"}
+          Copy-Item $base "dist/CSM Visualizador XML 3.13.1 - Instalador Completo.exe" -Force
+
+      - name: Homologar instalação limpa 3.13.1
+        shell: pwsh
+        run: |
+          $installer=(Resolve-Path "dist/CSM Visualizador XML 3.13.1 - Instalador Completo.exe").Path
+          $dir=Join-Path $env:TEMP "CSM-3130-Maquina-Limpa";Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+          $p=Start-Process $installer -ArgumentList ('/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="'+$dir+'"') -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Instalação limpa falhou"}
+          $info=Join-Path $dir "_internal/csm/build-info.json";$fiscal=Join-Path $dir "_internal/csm/CSM Fiscal Core.exe";$launcher=Join-Path $dir "CSM Visualizador XML.exe";$app=Join-Path $dir "_internal/web/app.js"
+          foreach($f in @($info,$fiscal,$launcher,$app)){if(!(Test-Path $f)){throw "Arquivo instalado ausente: $f"}}
+          $bi=Get-Content $info -Raw|ConvertFrom-Json
+          if($bi.version -ne '3.13.1' -or !$bi.certificate_folder_manager -or !$bi.nfe_manifestacao_ciencia_210210 -or !$bi.nfe_native_workflow_3131 -or !$bi.nfe_issuer_local_xml_sources){throw "Pacote instalado não é 3.13.1"}
+          $txt=Get-Content $app -Raw
+          if($txt -notmatch 'CSM_NATIVE_NFE_WORKFLOW_3130' -or $txt -notmatch 'CSM_ISSUER_LOCAL_UI_3131' -or $txt -notmatch 'Obter XML completo' -or $txt -notmatch 'Pastas XML / SIEG'){throw "Frontend 3.13.1 não instalado"}
+          $fst=Start-Process $fiscal -ArgumentList 'selftest' -Wait -PassThru -WindowStyle Hidden
+          if($fst.ExitCode -ne 0){throw "Fiscal Core instalado falhou"}
+          $self=Start-Process $launcher -ArgumentList '--csm-launcher-selftest' -Wait -PassThru
+          if($self.ExitCode -ne 0){throw "Launcher instalado falhou"}
+          $un=Join-Path $dir 'unins000.exe';if(Test-Path $un){Start-Process $un -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait}
+
+      - name: Validação final
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path "dist/CSM Visualizador XML 3.13.1 - Instalador Completo.exe").Path
+          $h=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          if((Get-Item $exe).Length -lt 10000000){throw "Instalador pequeno demais"}
+          $h | Set-Content "dist/CSM Visualizador XML 3.13.1 - SHA256.txt" -Encoding ascii
+          Write-Host "SHA256=$h"
+
+      - name: Publicar instalador homologado
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSMVisualizadorXML-3.13.1-Instalador-Final
+          path: |
+            dist/CSM Visualizador XML 3.13.1 - Instalador Completo.exe
+            dist/CSM Visualizador XML 3.13.1 - SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
