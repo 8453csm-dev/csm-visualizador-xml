@@ -191,7 +191,7 @@ jobs:
           $bi=Get-Content $info -Raw|ConvertFrom-Json
           if($bi.version -ne '3.14.0' -or !$bi.csm_own_nfe_api -or !$bi.csm_repository_dist_nsu -or !$bi.native_key_lookup_key_only -or !$bi.fresh_update_launch){throw "Pacote instalado não é 3.14.0"}
           $txt=Get-Content $app -Raw
-          if($txt -notmatch 'CSM_OWN_NFE_UI_3140' -or $txt -notmatch '/api/nfe/by-key' -or $txt -notmatch 'Base CSM / Configurações'){throw "Frontend 3.14.0 não instalado"}
+          if($txt -notmatch 'CSM_OWN_NFE_UI_3140' -or $txt -notmatch '/api/nfe/by-key' -or $txt -notmatch '/api/nfe/repository/status'){throw "Frontend 3.14.0 não instalado"}
           $fst=Start-Process $fiscal -ArgumentList 'selftest' -Wait -PassThru -WindowStyle Hidden
           if($fst.ExitCode -ne 0){throw "Fiscal Core instalado falhou"}
           $repoStats=& $fiscal repo stats
