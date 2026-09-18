@@ -34,7 +34,7 @@ s=s.replace(old,new,1)
 
 start=s.find(' async function consult(){')
 if start<0: raise SystemExit('consult() não localizada')
-end=s.find('\\n go.onclick=consult;',start)
+end=s.find('\n go.onclick=consult;',start)
 if end<0: raise SystemExit('Fim de consult() não localizado')
 new_consult=r''' async function waitRepository(k,seconds=30){
   const until=Date.now()+seconds*1000;
@@ -88,7 +88,7 @@ inject=r''' async function loadRepoStatus(){
   try{
     const r=await request('/api/nfe/repository/status',undefined,'GET');
     const xml=Number(r?.xml_count||0),idx=Number(r?.index_count||0),run=!!r?.sync_running,processed=Number(r?.sync_processed||0);
-    el.textContent=\`\${xml} XML\${xml===1?'':'s'} completos • \${idx} chave\${idx===1?'':'s'} indexada\${idx===1?'':'s'}\${run?' • sincronizando agora ('+processed+' empresas processadas)':''}\`;
+    el.textContent=`${xml} XML${xml===1?'':'s'} completos • ${idx} chave${idx===1?'':'s'} indexada${idx===1?'':'s'}${run?' • sincronizando agora ('+processed+' empresas processadas)':''}`;
   }catch(e){el.textContent='Status da Base CSM indisponível: '+e.message}
  }
  const syncBtn=q('csm3140-sync'),refreshBtn=q('csm3140-refresh');
@@ -97,8 +97,8 @@ inject=r''' async function loadRepoStatus(){
  q('csm3130-manage-toggle').onclick=()=>{manage.classList.toggle('show');if(manage.classList.contains('show'))loadRepoStatus()};'''
 s=s.replace(needle,inject,1)
 
-s=s.rstrip()+"\\n// "+MARK+" — consulta principal somente por chave; certificados viraram infraestrutura da Base CSM.\\n"
+s=s.rstrip()+"\n// "+MARK+" — consulta principal somente por chave; certificados viraram infraestrutura da Base CSM.\n"
 for tok in (MARK,'/api/nfe/by-key','Sincronizando a Base CSM','Base CSM / Configurações','/api/nfe/repository/status','/api/nfe/repository/sync'):
     if tok not in s: raise SystemExit('Frontend 3.14.0 incompleto: '+tok)
-app.write_text(s,encoding='utf-8',newline='\\n')
+app.write_text(s,encoding='utf-8',newline='\n')
 print('3.14.0: consulta NF-e somente por chave usando a API/Base CSM.')
