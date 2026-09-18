@@ -16,8 +16,10 @@ if old_cert not in s: raise SystemExit('CertConfigDir 3.13 não localizado')
 s=s.replace(old_cert,new_cert,1)
 
 old='''            if (cmd == "cert") return CertificateCommand(args.Skip(1).ToArray());
+            if (cmd == "manifest") return Manifest(args.Skip(1).ToArray());
             if (cmd == "consult") return Consult(args.Skip(1).ToArray());'''
 new='''            if (cmd == "cert") return CertificateCommand(args.Skip(1).ToArray());
+            if (cmd == "manifest") return Manifest(args.Skip(1).ToArray());
             if (cmd == "sync") return SyncRepository(args.Skip(1).ToArray());
             if (cmd == "repo") return RepositoryCommand(args.Skip(1).ToArray());
             if (cmd == "consult") return Consult(args.Skip(1).ToArray());'''
