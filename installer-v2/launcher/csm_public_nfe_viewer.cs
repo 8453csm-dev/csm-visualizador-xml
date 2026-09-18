@@ -167,7 +167,7 @@ internal static class CsmPublicNfeViewer
     {
         var psi = new ProcessStartInfo();
         psi.FileName = browser;
-        psi.Arguments = "--app="" + url + "" --user-data-dir="" + profile + "" --no-first-run --no-default-browser-check --window-size=1080,860";
+        psi.Arguments = "--app=\"" + url + "\" --user-data-dir=\"" + profile + "\" --no-first-run --no-default-browser-check --window-size=1080,860";
         psi.UseShellExecute = false;
         psi.CreateNoWindow = true;
         var p = Process.Start(psi);
