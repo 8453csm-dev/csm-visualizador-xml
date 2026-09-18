@@ -11,6 +11,11 @@ if 'CSM_ISSUER_LOCAL_XML_3131' not in s:
 if 'CSM_FISCAL_CORE_BROKER_3120' not in s:
     raise SystemExit('Broker Fiscal Core ausente')
 
+old_xml_cfg='''    return filepath.Join(base, "CSM Visualizador XML", "xml-folders.json")'''
+new_xml_cfg='''    return filepath.Join(base, "CSM", "VisualizadorXML", "xml-folders.json")'''
+if old_xml_cfg not in s: raise SystemExit('Configuração XML 3.13.1 não localizada')
+s=s.replace(old_xml_cfg,new_xml_cfg,1)
+
 # Indexa automaticamente todo XML NF-e que passa pelo pipeline normal.
 old='''func (b *broker) queuePath(path string) {
     path = strings.TrimSpace(path)
@@ -37,7 +42,7 @@ var csmRepositorySyncProcessed int
 func csmRepositoryRoot() string {
     base:=strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
     if base=="" { if v,err:=os.UserConfigDir();err==nil { base=v } }
-    return filepath.Join(base,"CSM Visualizador XML","repository")
+    return filepath.Join(base,"CSM","VisualizadorXML","repository")
 }
 func csmRepositoryNFeDir() string { return filepath.Join(csmRepositoryRoot(),"nfe") }
 func csmRepositoryXMLPath(key string) string { return filepath.Join(csmRepositoryNFeDir(),key+".xml") }
