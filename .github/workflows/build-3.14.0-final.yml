@@ -171,6 +171,12 @@ jobs:
           python installer-v2/prepare_release_3140.py
           python installer-v2/test_update_fresh_3140.py
           if($LASTEXITCODE -ne 0){throw "Preparação do instalador falhou"}
+          $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          node installer-v2/test_native_nfe_own_api_3140.js
+          if($LASTEXITCODE -ne 0){throw "Frontend 3.14.0 foi alterado antes do empacotamento"}
+          $expectedAppHash=(Get-FileHash $env:CSM_APP_JS -Algorithm SHA256).Hash.ToLower()
+          $expectedAppHash | Set-Content "temp/app-3140-expected.sha256" -Encoding ascii
+          Write-Host "APP_JS_EXPECTED_SHA256=$expectedAppHash"
           $path="installer-v2/CSMVisualizadorXML.iss";$text=Get-Content $path -Raw;$text=[regex]::Replace($text,'(?m)^UninstallDisplayVersion=.*\r?\n','');[IO.File]::WriteAllText((Resolve-Path $path),$text,[Text.UTF8Encoding]::new($false))
           $iscc="C:/Program Files (x86)/Inno Setup 6/ISCC.exe";if(!(Test-Path $iscc)){choco install innosetup -y --no-progress}
           New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -190,6 +196,11 @@ jobs:
           foreach($f in @($info,$fiscal,$launcher,$app)){if(!(Test-Path $f)){throw "Arquivo instalado ausente: $f"}}
           $bi=Get-Content $info -Raw|ConvertFrom-Json
           if($bi.version -ne '3.14.0' -or !$bi.csm_own_nfe_api -or !$bi.csm_repository_dist_nsu -or !$bi.native_key_lookup_key_only -or !$bi.fresh_update_launch){throw "Pacote instalado não é 3.14.0"}
+          $expectedAppHash=(Get-Content "temp/app-3140-expected.sha256" -Raw).Trim().ToLower()
+          $installedAppHash=(Get-FileHash $app -Algorithm SHA256).Hash.ToLower()
+          Write-Host "APP_JS_EXPECTED_SHA256=$expectedAppHash"
+          Write-Host "APP_JS_INSTALLED_SHA256=$installedAppHash"
+          if($installedAppHash -ne $expectedAppHash){throw "app.js instalado difere do payload empacotado"}
           $env:CSM_APP_JS=$app
           node installer-v2/test_native_nfe_own_api_3140.js
           if($LASTEXITCODE -ne 0){throw "Frontend 3.14.0 instalado falhou"}
