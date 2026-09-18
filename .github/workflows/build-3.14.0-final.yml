@@ -98,6 +98,9 @@ jobs:
           node installer-v2/test_tax_no_freeze.js
           node installer-v2/test_tax_entrypoint_v2.js
           if($LASTEXITCODE -ne 0){throw "Regressão nos módulos existentes"}
+          Copy-Item $env:CSM_APP_JS "temp/app-3140-homologado.js" -Force
+          $uiHash=(Get-FileHash "temp/app-3140-homologado.js" -Algorithm SHA256).Hash.ToLower()
+          Write-Host "FRONTEND_3140_HOMOLOGADO_SHA256=$uiHash"
 
       - name: Preparar launcher e Fiscal Core 3.14.0
         shell: pwsh
@@ -127,13 +130,20 @@ jobs:
           python installer-v2/patch_fiscal_core_manifestacao_3130.py
           python installer-v2/patch_fiscal_core_issuer_3131.py
           python installer-v2/patch_fiscal_core_repository_3140.py
+          if($LASTEXITCODE -ne 0){throw "Patch Base CSM 3.14.0 não foi aplicado"}
+          python installer-v2/test_repository_3140.py
+          if($LASTEXITCODE -ne 0){throw "Teste Base CSM 3.14.0 falhou"}
           python installer-v2/test_fiscal_core_soap_3121.py
           python installer-v2/test_manifestacao_3130.py
           python installer-v2/test_issuer_flow_3131.py
-          python installer-v2/test_repository_3140.py
           python installer-v2/test_cert_manager_3130.py
           python installer-v2/test_cert_manager_security_3130.py
           if($LASTEXITCODE -ne 0){throw "Patches/testes Fiscal Core 3.14.0 falharam"}
+          if(!(Test-Path "temp/app-3140-homologado.js")){throw "Snapshot do frontend 3.14.0 ausente"}
+          Copy-Item "temp/app-3140-homologado.js" "installer-v2/payload/_internal/web/app.js" -Force
+          $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          node installer-v2/test_native_nfe_own_api_3140.js
+          if($LASTEXITCODE -ne 0){throw "Frontend 3.14.0 não sobreviveu à preparação do launcher"}
           Get-ChildItem installer-v2/launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
           New-Item -ItemType Directory -Force -Path "installer-v2/payload/_internal/csm" | Out-Null
           $fx=Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319";$csc=Join-Path $fx "csc.exe"
