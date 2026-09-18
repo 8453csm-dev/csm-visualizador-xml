@@ -9,6 +9,12 @@ if MARK in s:
 if 'CSM_FISCAL_ISSUER_3131' not in s:
     raise SystemExit('Aplique o Fiscal Core 3.13.1 antes')
 
+# Desde 3.14.0 os dados persistentes ficam fora da pasta de instalação, para sobreviver às atualizações.
+old_cert='''        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CSM Visualizador XML", "certificados");'''
+new_cert='''        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CSM", "VisualizadorXML", "certificados");'''
+if old_cert not in s: raise SystemExit('CertConfigDir 3.13 não localizado')
+s=s.replace(old_cert,new_cert,1)
+
 old='''            if (cmd == "cert") return CertificateCommand(args.Skip(1).ToArray());
             if (cmd == "consult") return Consult(args.Skip(1).ToArray());'''
 new='''            if (cmd == "cert") return CertificateCommand(args.Skip(1).ToArray());
@@ -26,7 +32,7 @@ block=r'''
     // CSM_REPOSITORY_API_3140 — base local indexada por chave + distNSU oficial.
     private static string RepositoryRoot()
     {
-        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CSM Visualizador XML", "repository");
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CSM", "VisualizadorXML", "repository");
     }
     private static string RepositoryNFeDir() { return Path.Combine(RepositoryRoot(), "nfe"); }
     private static string RepositorySummaryDir() { return Path.Combine(RepositoryRoot(), "summary"); }
