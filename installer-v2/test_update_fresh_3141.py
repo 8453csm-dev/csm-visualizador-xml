@@ -5,7 +5,7 @@ for t in [
  'Parameters: "--post-install-fresh"',
  'PreserveCSMPersistentData',
  '/T /F /IM "CSM Visualizador XML Core.exe"',
- r'{localappdata}\\CSM\\VisualizadorXML'
+ r'{localappdata}\CSM\VisualizadorXML'
 ]:
     if t not in s: raise SystemExit('Update fresh 3.14.1 incompleto: '+t)
 print('OK - instalador 3.14.1 encerra runtime antigo, abre fresh e preserva dados persistentes.')
