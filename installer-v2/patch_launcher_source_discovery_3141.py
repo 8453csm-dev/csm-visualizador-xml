@@ -137,8 +137,37 @@ newmsg='''return map[string]any{"ok":true,"found":false,"xml_available":false,"k
 if oldmsg not in s: raise SystemExit('Mensagem final repositoryLookup não localizada')
 s=s.replace(oldmsg,newmsg,1)
 
+selftest=r'''
+func runXMLSourceDiscoverySelftest() bool {
+    root,err:=os.MkdirTemp("","csm-xml-source-selftest-")
+    if err!=nil { return false }
+    defer os.RemoveAll(root)
+    key:="35260802562527000135550010000194421659945019"
+    issuer:=key[6:20]
+    dir:=filepath.Join(root,issuer)
+    if os.MkdirAll(dir,0755)!=nil { return false }
+    xml:="<?xml version=\\\"1.0\\\" encoding=\\\"utf-8\\\"?><nfeProc xmlns=\\\"http://www.portalfiscal.inf.br/nfe\\\"><NFe><infNFe Id=\\\"NFe"+key+"\\\"></infNFe></NFe><protNFe><infProt><chNFe>"+key+"</chNFe></infProt></protNFe></nfeProc>"
+    path:=filepath.Join(dir,"nota-"+key+".xml")
+    if os.WriteFile(path,[]byte(xml),0644)!=nil { return false }
+    old:=os.Getenv("CSM_SIEG_ROOT")
+    _=os.Setenv("CSM_SIEG_ROOT",root)
+    defer func(){ _=os.Setenv("CSM_SIEG_ROOT",old) }()
+    found,raw,e:=findLocalNFeXML(key)
+    return e==nil && strings.EqualFold(found,path) && xmlBytesMatchNFeKey(raw,key)
+}
+
+'''
+main_old='''func main() {'''
+main_new='''func main() {
+    if len(os.Args)>1 && os.Args[1]=="--csm-source-selftest" {
+        if !runXMLSourceDiscoverySelftest() { os.Exit(71) }
+        return
+    }'''
+if main_old not in s: raise SystemExit('main() não localizado para self-test 3.14.1')
+s=s.replace(main_old,main_new,1)
+s=s.replace('// CSM_XML_SOURCE_DISCOVERY_3141',selftest+'// CSM_XML_SOURCE_DISCOVERY_3141',1)
 s=s.rstrip()+"\n// "+MARK+" — descobre SIEG em unidades mapeadas, prioriza CNPJ da chave e reduz I/O em rede.\n"
-for tok in (MARK,'existingXMLSourceRoots','sourceSearchRootsForKey','readXMLIfMatches','CSM_SIEG_ROOT','Base CSM + XML/SIEG + DF-e'):
+for tok in (MARK,'existingXMLSourceRoots','sourceSearchRootsForKey','readXMLIfMatches','CSM_SIEG_ROOT','Base CSM + XML/SIEG + DF-e','runXMLSourceDiscoverySelftest','--csm-source-selftest'):
     if tok not in s: raise SystemExit('Patch 3.14.1 incompleto: '+tok)
 p.write_text(s,encoding='utf-8',newline='\n')
 print('3.14.1: SIEG/XML autodetectado e consulta por chave busca fontes reais antes de aguardar DF-e.')
