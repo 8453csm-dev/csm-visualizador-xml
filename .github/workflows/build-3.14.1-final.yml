@@ -192,7 +192,7 @@ jobs:
           python installer-v2/prepare_release_3131.py
           python installer-v2/prepare_release_3140.py
           python installer-v2/prepare_release_3141.py
-          python installer-v2/test_update_fresh_3140.py
+          python installer-v2/test_update_fresh_3141.py
           if($LASTEXITCODE -ne 0){throw "Preparação do instalador falhou"}
           $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
           node installer-v2/test_native_nfe_own_api_3140.js
