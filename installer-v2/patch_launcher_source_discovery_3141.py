@@ -164,8 +164,7 @@ main_new='''func main() {
         return
     }'''
 if main_old not in s: raise SystemExit('main() não localizado para self-test 3.14.1')
-s=s.replace(main_old,main_new,1)
-s=s.replace('// CSM_XML_SOURCE_DISCOVERY_3141',selftest+'// CSM_XML_SOURCE_DISCOVERY_3141',1)
+s=s.replace(main_old,selftest+main_new,1)
 s=s.rstrip()+"\n// "+MARK+" — descobre SIEG em unidades mapeadas, prioriza CNPJ da chave e reduz I/O em rede.\n"
 for tok in (MARK,'existingXMLSourceRoots','sourceSearchRootsForKey','readXMLIfMatches','CSM_SIEG_ROOT','Base CSM + XML/SIEG + DF-e','runXMLSourceDiscoverySelftest','--csm-source-selftest'):
     if tok not in s: raise SystemExit('Patch 3.14.1 incompleto: '+tok)
