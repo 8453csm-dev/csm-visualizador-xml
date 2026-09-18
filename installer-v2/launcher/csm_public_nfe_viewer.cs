@@ -423,8 +423,8 @@ internal static class CsmPublicNfeViewer
             Directory.CreateDirectory(tempProfile);
             var psi = new ProcessStartInfo();
             psi.FileName = browser;
-            psi.Arguments = "--headless=new --disable-gpu --no-pdf-header-footer --print-to-pdf-no-header --user-data-dir="" + tempProfile +
-                            "" --print-to-pdf="" + pdfPath + "" "" + uri + """;
+            psi.Arguments = "--headless=new --disable-gpu --no-pdf-header-footer --print-to-pdf-no-header --user-data-dir=\"" + tempProfile +
+                            "\" --print-to-pdf=\"" + pdfPath + "\" \"" + uri + "\"";
             psi.UseShellExecute = false;
             psi.CreateNoWindow = true;
             var p = Process.Start(psi);
