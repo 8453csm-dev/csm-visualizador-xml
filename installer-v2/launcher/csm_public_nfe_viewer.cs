@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -30,15 +31,16 @@ internal static class CsmPublicNfeViewer
         if (args.Length == 1 && String.Equals(args[0], "--selftest", StringComparison.OrdinalIgnoreCase))
             return SelfTest();
 
-        if (args.Length < 3) return 10;
+        if (args.Length < 1) return 10;
         _key = DigitsOnly(args[0]);
-        _statusPath = args[1] ?? "";
-        var pdfPath = args[2] ?? "";
-        if (_key.Length != 44 || String.IsNullOrWhiteSpace(_statusPath) || String.IsNullOrWhiteSpace(pdfPath)) return 11;
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CSM", "VisualizadorXML", "public-nfe");
+        var jobId = DateTime.UtcNow.Ticks.ToString(CultureInfo.InvariantCulture);
+        _statusPath = args.Length >= 2 && !String.IsNullOrWhiteSpace(args[1]) ? args[1] : Path.Combine(root, "jobs", jobId + ".json");
+        var pdfPath = args.Length >= 3 && !String.IsNullOrWhiteSpace(args[2]) ? args[2] : Path.Combine(root, "cache", "Consulta Pública NF-e " + _key + ".pdf");
+        if (_key.Length != 44) return 11;
 
         try
         {
-            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CSM", "VisualizadorXML", "public-nfe");
             Directory.CreateDirectory(root);
             Directory.CreateDirectory(Path.GetDirectoryName(_statusPath));
             Directory.CreateDirectory(Path.GetDirectoryName(pdfPath));
@@ -129,6 +131,7 @@ internal static class CsmPublicNfeViewer
             }
 
             WriteStatus("done", "NF-e consultada e aberta no Visualizador.", pdfPath, true);
+            NotifyBrokerOpen(pdfPath);
             CleanupSavedPage(htmlPath);
             return 0;
         }
@@ -437,6 +440,21 @@ internal static class CsmPublicNfeViewer
         }
         catch (Exception ex) { Log("Render PDF: " + ex.Message); }
         return false;
+    }
+
+    private static void NotifyBrokerOpen(string path)
+    {
+        try
+        {
+            var body = "{\"paths\":[\"" + JsonEscape(path) + "\"]}";
+            using (var wc = new WebClient())
+            {
+                wc.Headers[HttpRequestHeader.ContentType] = "application/json";
+                wc.UploadString("http://127.0.0.1:47878/open", "POST", body);
+            }
+            Log("Consulta pública enviada ao Visualizador.");
+        }
+        catch (Exception ex) { Log("Falha ao avisar o broker: " + ex.Message); }
     }
 
     private static void ClosePortalWindow()
