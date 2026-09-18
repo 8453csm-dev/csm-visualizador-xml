@@ -60,7 +60,12 @@ jobs:
           python installer-v2/patch_release_identity_3121.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
           python installer-v2/patch_native_nfe_workflow_3130.py "installer-v2/payload/_internal/web"
           python installer-v2/patch_native_nfe_issuer_3131.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Frontend 3.13.1 falhou"}
           python installer-v2/patch_native_nfe_own_api_3140.py "installer-v2/payload/_internal/web"
+          if($LASTEXITCODE -ne 0){throw "Frontend key-only 3.14.0 não foi aplicado"}
+          $env:CSM_APP_JS=(Resolve-Path "installer-v2/payload/_internal/web/app.js").Path
+          node installer-v2/test_native_nfe_own_api_3140.js
+          if($LASTEXITCODE -ne 0){throw "Frontend key-only 3.14.0 falhou imediatamente após o patch"}
           python installer-v2/patch_release_identity_3130.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
           python installer-v2/patch_release_identity_3131.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
           python installer-v2/patch_release_identity_3140.py "installer-v2/payload/_internal/web" "installer-v2/payload/_internal/csm"
